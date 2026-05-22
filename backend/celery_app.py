@@ -11,6 +11,7 @@ celery_app = Celery(
         "pipeline.tasks.classify",
         "pipeline.tasks.group",
         "pipeline.tasks.extract",
+        "pipeline.tasks.process",
     ],
 )
 

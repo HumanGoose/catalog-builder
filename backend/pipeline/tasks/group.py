@@ -8,6 +8,7 @@ from celery_app import celery_app
 from models.database import SessionLocal
 from models.job import Job
 from pipeline.tasks.extract import extract_specs
+from pipeline.tasks.process import process_image
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -178,6 +179,10 @@ def visual_group_images(self, classify_results, job_ids: list):
 
         for spec_job_id in spec_job_ids:
             extract_specs.delay(spec_job_id)
+        
+        for job in valid_jobs:
+            if job.status == "GROUPED" and job.image_type in ("front", "back", "detail"):
+                process_image.delay(job.id)
         
         return {
             "grouped": len(parsed["groups"]),
