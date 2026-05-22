@@ -7,17 +7,17 @@ A full-stack automated garment catalog builder built as a job application projec
 - **Backend:** Python 3.11 + FastAPI
 - **Queue:** Celery + Redis (message broker)
 - **Database:** SQLite via SQLAlchemy
-- **Image processing:** Pillow (rembg planned)
+- **Image processing:** Pillow (EXIF correction, brightness/contrast enhancement, resize by type)
 - **AI:** OpenRouter API — two models:
   - `google/gemini-2.0-flash-lite-001` for per-image classification
-  - `google/gemini-2.5-flash` for visual batch grouping
+  - `google/gemini-2.5-flash` for visual batch grouping and spec extraction
 - **PPT generation:** python-pptx (planned)
 - **Frontend:** React 18 + Tailwind CSS (planned)
 - **Infra:** Docker Compose (5 services: redis, api, worker, flower, frontend)
 
 ## Pipeline — Current Architecture
 
-Upload triggers a Celery **chord**:
+Upload triggers a Celery **chord**. After grouping, two more tasks fan out automatically:
 
 ```
 For each image:
@@ -26,6 +26,10 @@ For each image:
                                          visual_group_images (runs once all done)
                                         ↗
 All images classified (parallel)
+
+After grouping (triggered by group.py):
+    spec jobs   → extract_specs  → SPEC_EXTRACTED
+    garment jobs → process_image → PROCESSED
 ```
 
 After grouping, each job gets one of:
@@ -37,13 +41,16 @@ After grouping, each job gets one of:
 
 | Task | File | What it does |
 |------|------|-------------|
-| `classify_image` | `pipeline/tasks/classify.py` | Calls Gemini to classify each image as `garment` or `spec`, sets `image_type` and `confidence` |
-| `visual_group_images` | `pipeline/tasks/group.py` | Sends all thumbnails in one multi-image call to Gemini 2.5 Flash; gets back groups with `best_front`, `best_back`, `details`, `spec`, `duplicates`; writes `style_group` and refined `image_type` back to each Job |
+| `classify_image` | `pipeline/tasks/classify.py` | Calls Gemini Flash Lite to classify each image as `garment` or `spec`, sets `image_type` and `confidence` |
+| `visual_group_images` | `pipeline/tasks/group.py` | Sends all thumbnails (300px) in one multi-image call to Gemini 2.5 Flash; returns groups with `best_front`, `best_back`, `details`, `spec`, `duplicates`; writes `style_group` and refined `image_type` back to each Job; then fires `extract_specs` and `process_image` for grouped jobs |
+| `extract_specs` | `pipeline/tasks/extract.py` | For spec-type images, calls Gemini 2.5 Flash to parse the label and extract `reference_no`, `fabric`, `gsm`, `date`, `afs` into `Job.spec_data` |
+| `process_image` | `pipeline/tasks/process.py` | For front/back/detail images, applies EXIF correction, brightness/contrast enhancement, and resizes (front/back→1200px, detail→600px); writes result to `storage/processed/` |
 
 ### Job status flow
 
 ```
-UPLOADED → CLASSIFYING → CLASSIFIED → GROUPED
+UPLOADED → CLASSIFYING → CLASSIFIED → GROUPED → PROCESSING → PROCESSED   (garment images)
+                                              → EXTRACTING → SPEC_EXTRACTED (spec images)
                                     → DUPLICATE
                                     → NEEDS_REVIEW
                        → FAILED
@@ -58,7 +65,7 @@ After grouping: `front`, `back`, `detail`, `spec`, or `duplicate`
 
 | Model | Purpose |
 |-------|---------|
-| `Job` | One record per uploaded image — tracks status, `image_type`, `style_group`, `confidence`, `spec_data` |
+| `Job` | One record per uploaded image — tracks status, `image_type`, `style_group`, `confidence`, `spec_data`, `original_path`, `processed_path` |
 | `GarmentGroup` | Groups front/back/detail/spec jobs of the same style (not yet populated by pipeline) |
 | `Slide` | One per complete garment group — holds all editable PPT fields (not yet populated) |
 
@@ -97,7 +104,7 @@ catalog-builder/
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   ├── main.py                  ← FastAPI app, mounts static files, includes routers
-│   ├── celery_app.py            ← Celery instance (includes classify + group tasks)
+│   ├── celery_app.py            ← Celery instance (auto-discovers all tasks)
 │   ├── api/
 │   │   └── routes/
 │   │       ├── upload.py        ← POST /upload (chord dispatch)
@@ -105,13 +112,15 @@ catalog-builder/
 │   ├── pipeline/
 │   │   └── tasks/
 │   │       ├── classify.py      ← classify_image task
-│   │       └── group.py         ← visual_group_images task
+│   │       ├── group.py         ← visual_group_images task (fires extract + process)
+│   │       ├── extract.py       ← extract_specs task
+│   │       └── process.py       ← process_image task
 │   ├── models/
 │   │   ├── database.py          ← SQLAlchemy engine + session
 │   │   └── job.py               ← Job, GarmentGroup, Slide ORM models
 │   └── storage/
 │       ├── uploads/             ← raw incoming images
-│       ├── processed/           ← background-removed + cleaned images (planned)
+│       ├── processed/           ← cleaned + resized images
 │       └── output/              ← final Catalog.pptx (planned)
 └── frontend/                    ← not yet built
 ```
