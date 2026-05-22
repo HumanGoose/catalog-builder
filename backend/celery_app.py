@@ -10,6 +10,7 @@ celery_app = Celery(
     include=[
         "pipeline.tasks.classify",
         "pipeline.tasks.group",
+        "pipeline.tasks.extract",
     ],
 )
 

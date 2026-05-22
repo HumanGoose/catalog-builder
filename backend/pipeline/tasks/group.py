@@ -7,6 +7,7 @@ from PIL import Image
 from celery_app import celery_app
 from models.database import SessionLocal
 from models.job import Job
+from pipeline.tasks.extract import extract_specs
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -120,7 +121,7 @@ def visual_group_images(self, classify_results, job_ids: list):
             if content_text.startswith("json"):
                 content_text = content_text[4:]
         content_text = content_text.strip()
-
+        spec_job_ids = []
         parsed = json.loads(content_text)
 
         # Write results to database
@@ -149,6 +150,7 @@ def visual_group_images(self, classify_results, job_ids: list):
                     job.status = "GROUPED"
 
             if group.get("spec"):
+                spec_job_ids.append(group["spec"])
                 job = db.query(Job).filter(Job.id == group["spec"]).first()
                 if job:
                     job.style_group = canonical
@@ -174,6 +176,9 @@ def visual_group_images(self, classify_results, job_ids: list):
 
         db.commit()
 
+        for spec_job_id in spec_job_ids:
+            extract_specs.delay(spec_job_id)
+        
         return {
             "grouped": len(parsed["groups"]),
             "groups": [{"name": g["canonical_name"]} for g in parsed["groups"]]
