@@ -1,41 +1,83 @@
 # alaiy-catalog-builder
 
-A full-stack automated garment catalog builder built as a job application project for Alaiy. Accepts raw garment photos, runs them through an AI classification + processing pipeline, and generates a PowerPoint catalog matching the reference template.
+A full-stack automated garment catalog builder built as a job application project for Alaiy. Accepts raw garment photos, runs them through an AI classification + grouping pipeline, and generates a PowerPoint catalog matching the reference template.
 
 ## Tech Stack
 
 - **Backend:** Python 3.11 + FastAPI
 - **Queue:** Celery + Redis (message broker)
 - **Database:** SQLite via SQLAlchemy
-- **Image processing:** rembg + Pillow
-- **AI:** OpenRouter API (`google/gemini-flash-1.5`)
-- **PPT generation:** python-pptx
-- **Frontend:** React 18 + Tailwind CSS
+- **Image processing:** Pillow (rembg planned)
+- **AI:** OpenRouter API — two models:
+  - `google/gemini-2.0-flash-lite-001` for per-image classification
+  - `google/gemini-2.5-flash` for visual batch grouping
+- **PPT generation:** python-pptx (planned)
+- **Frontend:** React 18 + Tailwind CSS (planned)
 - **Infra:** Docker Compose (5 services: redis, api, worker, flower, frontend)
 
-## Pipeline Stages (per image)
+## Pipeline — Current Architecture
+
+Upload triggers a Celery **chord**:
 
 ```
-UPLOADED → CLASSIFIED → SPEC_EXTRACTED → PROCESSED → ASSIGNED → DONE
+For each image:
+    UPLOADED → CLASSIFYING → CLASSIFIED
+                                        ↘
+                                         visual_group_images (runs once all done)
+                                        ↗
+All images classified (parallel)
 ```
 
-Each stage is a separate Celery task chained together:
-`classify_image → extract_specs → process_image → assign_to_slide`
+After grouping, each job gets one of:
+- `GROUPED` — assigned to a style group with a role (front/back/detail/spec)
+- `DUPLICATE` — near-identical to another image, skipped
+- `NEEDS_REVIEW` — not assigned to any group by the AI
+
+### Task details
+
+| Task | File | What it does |
+|------|------|-------------|
+| `classify_image` | `pipeline/tasks/classify.py` | Calls Gemini to classify each image as `garment` or `spec`, sets `image_type` and `confidence` |
+| `visual_group_images` | `pipeline/tasks/group.py` | Sends all thumbnails in one multi-image call to Gemini 2.5 Flash; gets back groups with `best_front`, `best_back`, `details`, `spec`, `duplicates`; writes `style_group` and refined `image_type` back to each Job |
+
+### Job status flow
+
+```
+UPLOADED → CLASSIFYING → CLASSIFIED → GROUPED
+                                    → DUPLICATE
+                                    → NEEDS_REVIEW
+                       → FAILED
+```
+
+### Job.image_type values
+
+After classification: `garment` or `spec`  
+After grouping: `front`, `back`, `detail`, `spec`, or `duplicate`
 
 ## Database Models
 
 | Model | Purpose |
 |-------|---------|
-| `Job` | One record per uploaded image — tracks status and extracted data |
-| `GarmentGroup` | Groups front/back/detail/spec images of the same style |
-| `Slide` | One per complete garment group — holds all editable PPT fields |
+| `Job` | One record per uploaded image — tracks status, `image_type`, `style_group`, `confidence`, `spec_data` |
+| `GarmentGroup` | Groups front/back/detail/spec jobs of the same style (not yet populated by pipeline) |
+| `Slide` | One per complete garment group — holds all editable PPT fields (not yet populated) |
 
 ## API Routes
 
+### Implemented
+
 ```
-POST   /upload          — accept image uploads, create Job records
-GET    /jobs            — list all jobs
+POST   /upload          — accept image uploads, create Job records, fire chord
+GET    /jobs            — list all jobs (ordered by created_at desc)
 GET    /jobs/{id}       — single job status
+GET    /health          — liveness check
+```
+
+Static file mounts: `/uploads/*` and `/processed/*`
+
+### Planned (not yet built)
+
+```
 GET    /groups          — list garment groups
 PATCH  /groups/{id}     — update group (manual reclassification)
 GET    /slides          — list slides
@@ -43,15 +85,6 @@ PATCH  /slides/{id}     — edit slide fields before export
 GET    /export/pptx     — trigger PPT generation, return file
 WS     /ws              — WebSocket for real-time events
 ```
-
-## WebSocket Events
-
-| Event | When |
-|-------|------|
-| `job_update` | Every pipeline status change |
-| `group_complete` | A garment group has all image types |
-| `slide_ready` | A Slide record is created (includes image URLs) |
-| `pipeline_complete` | All uploaded images are done |
 
 ## Folder Structure
 
@@ -63,37 +96,30 @@ catalog-builder/
 ├── backend/
 │   ├── Dockerfile
 │   ├── requirements.txt
-│   ├── main.py            ← FastAPI app entrypoint
-│   ├── celery_app.py      ← Celery app instance
+│   ├── main.py                  ← FastAPI app, mounts static files, includes routers
+│   ├── celery_app.py            ← Celery instance (includes classify + group tasks)
 │   ├── api/
-│   │   ├── routes/        ← upload.py, jobs.py, groups.py, slides.py, export.py
-│   │   └── websocket.py
+│   │   └── routes/
+│   │       ├── upload.py        ← POST /upload (chord dispatch)
+│   │       └── jobs.py          ← GET /jobs, GET /jobs/{id}
 │   ├── pipeline/
-│   │   └── tasks/         ← classify.py, extract.py, process.py, build_ppt.py
+│   │   └── tasks/
+│   │       ├── classify.py      ← classify_image task
+│   │       └── group.py         ← visual_group_images task
 │   ├── models/
-│   │   ├── database.py    ← SQLAlchemy engine + session
-│   │   └── job.py         ← ORM models
+│   │   ├── database.py          ← SQLAlchemy engine + session
+│   │   └── job.py               ← Job, GarmentGroup, Slide ORM models
 │   └── storage/
-│       ├── uploads/       ← raw incoming images
-│       ├── processed/     ← background-removed + cleaned images
-│       └── output/        ← final Catalog.pptx
-└── frontend/
-    ├── Dockerfile
-    ├── package.json
-    └── src/
-        ├── App.jsx
-        ├── components/    ← UploadZone, LiveCanvas, PipelineStatus, SlideEditor
-        └── hooks/
-            └── useWebSocket.js
+│       ├── uploads/             ← raw incoming images
+│       ├── processed/           ← background-removed + cleaned images (planned)
+│       └── output/              ← final Catalog.pptx (planned)
+└── frontend/                    ← not yet built
 ```
 
 ## Dev Commands
 
 ```bash
-# Start everything
-docker compose up --build
-
-# Start only backend services (no frontend)
+# Start backend services
 docker compose up redis api worker flower
 
 # View worker logs
@@ -104,9 +130,6 @@ http://localhost:5555
 
 # Access API docs
 http://localhost:8000/docs
-
-# Access frontend
-http://localhost:3000
 
 # Rebuild a single service
 docker compose build api

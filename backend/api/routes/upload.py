@@ -4,8 +4,11 @@ import shutil
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
+from celery import chord
 from models.database import get_db
 from models.job import Job
+from pipeline.tasks.classify import classify_image
+from pipeline.tasks.group import visual_group_images
 
 router = APIRouter()
 
@@ -19,21 +22,17 @@ async def upload_images(
     created_jobs = []
 
     for file in files:
-        # Validate file type
         if not file.content_type.startswith("image/"):
             raise HTTPException(status_code=400, detail=f"{file.filename} is not an image")
 
-        # Give it a unique name so duplicate filenames don't collide
         job_id = str(uuid.uuid4())
         ext = os.path.splitext(file.filename)[1]
         saved_filename = f"{job_id}{ext}"
         save_path = os.path.join(UPLOAD_DIR, saved_filename)
 
-        # Save file to disk
         with open(save_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        # Create Job record in database
         job = Job(
             id=job_id,
             filename=file.filename,
@@ -44,6 +43,12 @@ async def upload_images(
         created_jobs.append(job)
 
     db.commit()
+
+    job_ids = [j.id for j in created_jobs]
+
+    chord(
+        classify_image.s(job_id) for job_id in job_ids
+    )(visual_group_images.s(job_ids))
 
     return {
         "uploaded": len(created_jobs),
