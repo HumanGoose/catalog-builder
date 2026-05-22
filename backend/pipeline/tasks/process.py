@@ -3,6 +3,7 @@ from PIL import Image, ImageEnhance, ImageOps
 from celery_app import celery_app
 from models.database import SessionLocal
 from models.job import Job
+from pipeline.events import emit
 
 PROCESSED_DIR = "storage/processed"
 
@@ -39,6 +40,7 @@ def process_image(self, job_id: str):
 
         job.status = "PROCESSING"
         db.commit()
+        emit("job.status", {"job_id": job_id, "status": "PROCESSING"})
 
         original_filename = os.path.basename(job.original_path)
         name_without_ext = os.path.splitext(original_filename)[0]
@@ -51,6 +53,7 @@ def process_image(self, job_id: str):
         job.processed_path = actual_output_path
         job.status = "PROCESSED"
         db.commit()
+        emit("job.status", {"job_id": job_id, "status": "PROCESSED", "processed_path": actual_output_path})
 
         print(f"[PROCESS] Done: {actual_output_path}")
         return {"job_id": job_id, "processed_path": actual_output_path}
@@ -61,6 +64,7 @@ def process_image(self, job_id: str):
             job.status = "FAILED"
             job.error = str(e)
             db.commit()
+            emit("job.status", {"job_id": job_id, "status": "FAILED"})
         raise self.retry(exc=e, countdown=5)
     finally:
         db.close()

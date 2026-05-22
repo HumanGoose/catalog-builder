@@ -11,6 +11,7 @@ from celery import chord
 from pipeline.tasks.assign_to_slide import assign_to_slide
 from pipeline.tasks.extract import extract_specs
 from pipeline.tasks.process import process_image
+from pipeline.events import emit
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -137,6 +138,7 @@ def visual_group_images(self, classify_results, job_ids: list):
                     job.style_group = canonical
                     job.image_type = "front"
                     job.status = "GROUPED"
+                    emit("job.status", {"job_id": job.id, "status": "GROUPED", "image_type": "front", "style_group": canonical})
 
             if group.get("best_back"):
                 job = db.query(Job).filter(Job.id == group["best_back"]).first()
@@ -144,6 +146,7 @@ def visual_group_images(self, classify_results, job_ids: list):
                     job.style_group = canonical
                     job.image_type = "back"
                     job.status = "GROUPED"
+                    emit("job.status", {"job_id": job.id, "status": "GROUPED", "image_type": "back", "style_group": canonical})
 
             for detail_id in group.get("details", []):
                 job = db.query(Job).filter(Job.id == detail_id).first()
@@ -151,6 +154,7 @@ def visual_group_images(self, classify_results, job_ids: list):
                     job.style_group = canonical
                     job.image_type = "detail"
                     job.status = "GROUPED"
+                    emit("job.status", {"job_id": job.id, "status": "GROUPED", "image_type": "detail", "style_group": canonical})
 
             if group.get("spec"):
                 spec_job_ids.append(group["spec"])
@@ -159,6 +163,7 @@ def visual_group_images(self, classify_results, job_ids: list):
                     job.style_group = canonical
                     job.image_type = "spec"
                     job.status = "GROUPED"
+                    emit("job.status", {"job_id": job.id, "status": "GROUPED", "image_type": "spec", "style_group": canonical})
 
             for dup_id in group.get("duplicates", []):
                 job = db.query(Job).filter(Job.id == dup_id).first()
@@ -166,6 +171,7 @@ def visual_group_images(self, classify_results, job_ids: list):
                     job.style_group = canonical
                     job.image_type = "duplicate"
                     job.status = "DUPLICATE"
+                    emit("job.status", {"job_id": job.id, "status": "DUPLICATE", "style_group": canonical})
 
         db.flush()
         
@@ -175,6 +181,7 @@ def visual_group_images(self, classify_results, job_ids: list):
         ).all()
         for job in ungrouped:
             job.status = "NEEDS_REVIEW"
+            emit("job.status", {"job_id": job.id, "status": "NEEDS_REVIEW"})
             print(f"[GROUP] Job {job.id} ({job.filename}) was not assigned to any group")
 
         db.commit()
@@ -200,18 +207,15 @@ def visual_group_images(self, classify_results, job_ids: list):
             per_job_sigs = []
             for job in group_jobs:
                 if job.image_type == "spec":
-                    job.status = "EXTRACTING"
                     per_job_sigs.append(extract_specs.s(job.id))
                 else:
-                    job.status = "PROCESSING"
                     per_job_sigs.append(process_image.s(job.id))
- 
+
             if per_job_sigs:
-                # chord: all per-job tasks → assign_to_slide callback
                 chord(per_job_sigs)(
                     assign_to_slide.s(canonical_name)
                 )
- 
+
         db.commit()
         
         return {

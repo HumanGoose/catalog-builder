@@ -5,6 +5,7 @@ import httpx
 from celery_app import celery_app
 from models.database import SessionLocal
 from models.job import Job
+from pipeline.events import emit
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -28,6 +29,7 @@ def classify_image(self, job_id: str):
             raise ValueError(f"Job {job_id} not found")
 
         update_job(db, job_id, status="CLASSIFYING")
+        emit("job.status", {"job_id": job_id, "status": "CLASSIFYING"})
 
         with open(job.original_path, "rb") as f:
             image_data = base64.b64encode(f.read()).decode("utf-8")
@@ -97,11 +99,13 @@ or
             image_type=image_type,
             confidence=parsed.get("confidence", 0.0)
         )
-
+        emit("job.status", {"job_id": job_id, "status": "CLASSIFIED", "image_type": image_type})
+        
         return {"job_id": job_id, "image_type": image_type}
 
     except Exception as e:
         update_job(db, job_id, status="FAILED", error=str(e))
+        emit("job.status", {"job_id": job_id, "status": "FAILED"})
         raise self.retry(exc=e, countdown=5)
     finally:
         db.close()

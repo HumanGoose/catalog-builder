@@ -19,6 +19,7 @@ from celery import shared_task
 from celery_app import celery_app
 from models.database import SessionLocal
 from models.job import Job, GarmentGroup, Slide
+from pipeline.events import emit
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +153,20 @@ def assign_to_slide(self, _chord_results, canonical_name: str):
             job.status = "ASSIGNED"
 
         db.commit()
+
+        for job in eligible:
+            emit("job.status", {"job_id": job.id, "status": "ASSIGNED"})
+
+        emit("group.complete", {
+            "group":      canonical_name,
+            "group_id":   garment_group.id,
+            "slide_id":   slide.id,
+            "ref_no":     ref_no,
+            "has_front":  front_job  is not None,
+            "has_back":   back_job   is not None,
+            "has_detail": detail_job is not None,
+            "has_spec":   spec_job   is not None,
+        })
 
         logger.info(
             "assign_to_slide: group=%s → GarmentGroup %s, Slide %s (ref=%s)",

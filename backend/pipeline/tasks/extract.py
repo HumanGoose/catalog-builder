@@ -5,6 +5,7 @@ import httpx
 from celery_app import celery_app
 from models.database import SessionLocal
 from models.job import Job
+from pipeline.events import emit
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -23,6 +24,7 @@ def extract_specs(self, job_id: str):
 
         job.status = "EXTRACTING"
         db.commit()
+        emit("job.status", {"job_id": job_id, "status": "EXTRACTING"})
 
         with open(job.original_path, "rb") as f:
             image_data = base64.b64encode(f.read()).decode("utf-8")
@@ -98,6 +100,7 @@ Respond with only this JSON:
         job.spec_data = parsed
         job.status = "SPEC_EXTRACTED"
         db.commit()
+        emit("job.status", {"job_id": job_id, "status": "SPEC_EXTRACTED", "spec_data": parsed})
 
         return {"job_id": job_id, "spec_data": parsed}
 
@@ -107,6 +110,7 @@ Respond with only this JSON:
             job.status = "FAILED"
             job.error = str(e)
             db.commit()
+            emit("job.status", {"job_id": job_id, "status": "FAILED"})
         raise self.retry(exc=e, countdown=5)
     finally:
         db.close()
