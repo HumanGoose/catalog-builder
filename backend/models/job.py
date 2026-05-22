@@ -56,6 +56,7 @@ class Slide(Base):
     fabric = Column(String, nullable=True)
     gsm = Column(String, nullable=True)
     date = Column(String, nullable=True)
+    afs = Column(String, nullable=True)
     front_image_path = Column(String, nullable=True)
     back_image_path = Column(String, nullable=True)
     detail_image_path = Column(String, nullable=True)

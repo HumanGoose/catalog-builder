@@ -7,6 +7,8 @@ from PIL import Image
 from celery_app import celery_app
 from models.database import SessionLocal
 from models.job import Job
+from celery import chord
+from pipeline.tasks.assign_to_slide import assign_to_slide
 from pipeline.tasks.extract import extract_specs
 from pipeline.tasks.process import process_image
 
@@ -177,12 +179,40 @@ def visual_group_images(self, classify_results, job_ids: list):
 
         db.commit()
 
-        for spec_job_id in spec_job_ids:
-            extract_specs.delay(spec_job_id)
-        
-        for job in valid_jobs:
-            if job.status == "GROUPED" and job.image_type in ("front", "back", "detail"):
-                process_image.delay(job.id)
+        # ------------------------------------------------------------------
+        # Fan out: one chord per canonical group.
+        # Each chord runs all per-job tasks in parallel, then fires
+        # assign_to_slide once everything in that group is done.
+        # ------------------------------------------------------------------
+        # Reload jobs to get fresh status/style_group after commit
+        grouped_jobs = (
+            db.query(Job)
+            .filter(Job.id.in_(job_ids), Job.status == "GROUPED")
+            .all()
+        )
+ 
+        # Bucket jobs by canonical group name
+        by_group: dict[str, list] = {}
+        for job in grouped_jobs:
+            by_group.setdefault(job.style_group, []).append(job)
+ 
+        for canonical_name, group_jobs in by_group.items():
+            per_job_sigs = []
+            for job in group_jobs:
+                if job.image_type == "spec":
+                    job.status = "EXTRACTING"
+                    per_job_sigs.append(extract_specs.s(job.id))
+                else:
+                    job.status = "PROCESSING"
+                    per_job_sigs.append(process_image.s(job.id))
+ 
+            if per_job_sigs:
+                # chord: all per-job tasks → assign_to_slide callback
+                chord(per_job_sigs)(
+                    assign_to_slide.s(canonical_name)
+                )
+ 
+        db.commit()
         
         return {
             "grouped": len(parsed["groups"]),

@@ -17,7 +17,7 @@ A full-stack automated garment catalog builder built as a job application projec
 
 ## Pipeline — Current Architecture
 
-Upload triggers a Celery **chord**. After grouping, two more tasks fan out automatically:
+Upload triggers a Celery **chord**. After grouping, one chord is fired **per canonical group**:
 
 ```
 For each image:
@@ -27,9 +27,11 @@ For each image:
                                         ↗
 All images classified (parallel)
 
-After grouping (triggered by group.py):
-    spec jobs   → extract_specs  → SPEC_EXTRACTED
-    garment jobs → process_image → PROCESSED
+After grouping — one chord per canonical group (triggered by group.py):
+    spec jobs    → extract_specs  → SPEC_EXTRACTED ↘
+                                                    assign_to_slide → ASSIGNED
+    garment jobs → process_image → PROCESSED       ↗
+    (all run in parallel within the group)
 ```
 
 After grouping, each job gets one of:
@@ -42,15 +44,16 @@ After grouping, each job gets one of:
 | Task | File | What it does |
 |------|------|-------------|
 | `classify_image` | `pipeline/tasks/classify.py` | Calls Gemini Flash Lite to classify each image as `garment` or `spec`, sets `image_type` and `confidence` |
-| `visual_group_images` | `pipeline/tasks/group.py` | Sends all thumbnails (300px) in one multi-image call to Gemini 2.5 Flash; returns groups with `best_front`, `best_back`, `details`, `spec`, `duplicates`; writes `style_group` and refined `image_type` back to each Job; then fires `extract_specs` and `process_image` for grouped jobs |
+| `visual_group_images` | `pipeline/tasks/group.py` | Sends all thumbnails (300px) in one multi-image call to Gemini 2.5 Flash; returns groups with `best_front`, `best_back`, `details`, `spec`, `duplicates`; writes `style_group` and refined `image_type` back to each Job; then fires one chord per group (process_image / extract_specs → assign_to_slide) |
 | `extract_specs` | `pipeline/tasks/extract.py` | For spec-type images, calls Gemini 2.5 Flash to parse the label and extract `reference_no`, `fabric`, `gsm`, `date`, `afs` into `Job.spec_data` |
 | `process_image` | `pipeline/tasks/process.py` | For front/back/detail images, applies EXIF correction, brightness/contrast enhancement, and resizes (front/back→1200px, detail→600px); writes result to `storage/processed/` |
+| `assign_to_slide` | `pipeline/tasks/assign_to_slide.py` | Chord callback per group — waits for all per-job tasks to finish, picks best image per role by confidence, merges spec data, upserts `GarmentGroup` and `Slide` records, marks all eligible jobs `ASSIGNED` |
 
 ### Job status flow
 
 ```
-UPLOADED → CLASSIFYING → CLASSIFIED → GROUPED → PROCESSING → PROCESSED   (garment images)
-                                              → EXTRACTING → SPEC_EXTRACTED (spec images)
+UPLOADED → CLASSIFYING → CLASSIFIED → GROUPED → PROCESSING → PROCESSED → ASSIGNED  (garment images)
+                                              → EXTRACTING → SPEC_EXTRACTED → ASSIGNED (spec images)
                                     → DUPLICATE
                                     → NEEDS_REVIEW
                        → FAILED
@@ -66,8 +69,8 @@ After grouping: `front`, `back`, `detail`, `spec`, or `duplicate`
 | Model | Purpose |
 |-------|---------|
 | `Job` | One record per uploaded image — tracks status, `image_type`, `style_group`, `confidence`, `spec_data`, `original_path`, `processed_path` |
-| `GarmentGroup` | Groups front/back/detail/spec jobs of the same style (not yet populated by pipeline) |
-| `Slide` | One per complete garment group — holds all editable PPT fields (not yet populated) |
+| `GarmentGroup` | Groups front/back/detail/spec jobs of the same style — populated by `assign_to_slide` |
+| `Slide` | One per complete garment group — holds all editable PPT fields; populated by `assign_to_slide` with ref_number, fabric, gsm, date, and image paths |
 
 ## API Routes
 
@@ -112,9 +115,10 @@ catalog-builder/
 │   ├── pipeline/
 │   │   └── tasks/
 │   │       ├── classify.py      ← classify_image task
-│   │       ├── group.py         ← visual_group_images task (fires extract + process)
+│   │       ├── group.py         ← visual_group_images task (fires per-group chords)
 │   │       ├── extract.py       ← extract_specs task
-│   │       └── process.py       ← process_image task
+│   │       ├── process.py       ← process_image task
+│   │       └── assign_to_slide.py ← assign_to_slide task (chord callback, builds GarmentGroup + Slide)
 │   ├── models/
 │   │   ├── database.py          ← SQLAlchemy engine + session
 │   │   └── job.py               ← Job, GarmentGroup, Slide ORM models
