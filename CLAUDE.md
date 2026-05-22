@@ -12,7 +12,7 @@ A full-stack automated garment catalog builder built as a job application projec
   - `google/gemini-2.0-flash-lite-001` for per-image classification
   - `google/gemini-2.5-flash` for visual batch grouping and spec extraction
 - **PPT generation:** python-pptx (planned)
-- **Frontend:** React 18 + Tailwind CSS (planned)
+- **Frontend:** React 18 + Tailwind CSS (scaffold exists; components not yet built)
 - **Infra:** Docker Compose (5 services: redis, api, worker, flower, frontend)
 
 ## Pipeline — Current Architecture
@@ -48,6 +48,7 @@ After grouping, each job gets one of:
 | `extract_specs` | `pipeline/tasks/extract.py` | For spec-type images, calls Gemini 2.5 Flash to parse the label and extract `reference_no`, `fabric`, `gsm`, `date`, `afs` into `Job.spec_data` |
 | `process_image` | `pipeline/tasks/process.py` | For front/back/detail images, applies EXIF correction, brightness/contrast enhancement, and resizes (front/back→1200px, detail→600px); writes result to `storage/processed/` |
 | `assign_to_slide` | `pipeline/tasks/assign_to_slide.py` | Chord callback per group — waits for all per-job tasks to finish, picks best image per role by confidence, merges spec data, upserts `GarmentGroup` and `Slide` records, marks all eligible jobs `ASSIGNED` |
+| `emit` (helper)   | `pipeline/events.py`                | Called by every task to publish job status events to Redis channel `catalog:events`; FastAPI startup subscribes and broadcasts to all connected WS clients |
 
 ### Job status flow
 
@@ -81,6 +82,7 @@ POST   /upload          — accept image uploads, create Job records, fire chord
 GET    /jobs            — list all jobs (ordered by created_at desc)
 GET    /jobs/{id}       — single job status
 GET    /health          — liveness check
+WS     /ws              — WebSocket for real-time pipeline events (push-only; clients send to detect disconnect)
 ```
 
 Static file mounts: `/uploads/*` and `/processed/*`
@@ -93,7 +95,6 @@ PATCH  /groups/{id}     — update group (manual reclassification)
 GET    /slides          — list slides
 PATCH  /slides/{id}     — edit slide fields before export
 GET    /export/pptx     — trigger PPT generation, return file
-WS     /ws              — WebSocket for real-time events
 ```
 
 ## Folder Structure
@@ -109,10 +110,14 @@ catalog-builder/
 │   ├── main.py                  ← FastAPI app, mounts static files, includes routers
 │   ├── celery_app.py            ← Celery instance (auto-discovers all tasks)
 │   ├── api/
-│   │   └── routes/
-│   │       ├── upload.py        ← POST /upload (chord dispatch)
-│   │       └── jobs.py          ← GET /jobs, GET /jobs/{id}
+│   │   ├── routes/
+│   │   │   ├── upload.py        ← POST /upload (chord dispatch)
+│   │   │   ├── jobs.py          ← GET /jobs, GET /jobs/{id}
+│   │   │   └── ws.py            ← WS /ws endpoint
+│   │   └── ws/
+│   │       └── manager.py       ← ConnectionManager + redis_subscriber (started on FastAPI startup)
 │   ├── pipeline/
+│   │   ├── events.py            ← emit() — publishes job events to Redis from workers
 │   │   └── tasks/
 │   │       ├── classify.py      ← classify_image task
 │   │       ├── group.py         ← visual_group_images task (fires per-group chords)
@@ -126,8 +131,14 @@ catalog-builder/
 │       ├── uploads/             ← raw incoming images
 │       ├── processed/           ← cleaned + resized images
 │       └── output/              ← final Catalog.pptx (planned)
-└── frontend/                    ← not yet built
+└── frontend/                    ← scaffold exists (React 18 + Tailwind); src/components/ and src/hooks/ are empty
 ```
+
+## Real-time Events
+
+Workers can't touch FastAPI's WebSocket list (separate process). Bridge: workers call `pipeline/events.py:emit()` → Redis pub/sub channel `catalog:events` → `api/ws/manager.py:redis_subscriber()` (started as `asyncio.create_task` on FastAPI startup) → broadcasts to all connected WS clients.
+
+Event shape: `{"event": "job.status", "job_id": ..., "status": ..., ...}`
 
 ## Dev Commands
 
