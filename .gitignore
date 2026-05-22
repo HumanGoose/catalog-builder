@@ -1,0 +1,41 @@
+# Secrets — never commit
+.env
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# SQLite databases (runtime state, not source)
+*.db
+*.sqlite3
+
+# Node modules (regenerate with npm install)
+node_modules/
+frontend/dist/
+frontend/.next/
+
+# Storage contents (user uploads, processed files, exports)
+# The folders are tracked via .gitkeep; contents are not
+backend/storage/uploads/*
+backend/storage/processed/*
+backend/storage/output/*
+!backend/storage/uploads/.gitkeep
+!backend/storage/processed/.gitkeep
+!backend/storage/output/.gitkeep
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editor noise
+.vscode/
+.idea/
+*.swp
