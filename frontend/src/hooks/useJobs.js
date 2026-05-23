@@ -60,6 +60,16 @@ export function useJobs() {
           },
         }
       })
+    } else if (event.event === 'group.deleted') {
+      setJobs(prev => {
+        const next = { ...prev }
+        Object.values(next).forEach(job => {
+          if (job.style_group === event.style_name) {
+            next[job.id] = { ...job, style_group: null, status: 'NEEDS_REVIEW' }
+          }
+        })
+        return next
+      })
     } else if (event.event === 'job.reassigned') {
       // Fired when a job is moved between groups or its role (image_type) is changed.
       // Update the in-memory job so role badges and group views stay in sync.

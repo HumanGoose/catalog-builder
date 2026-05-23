@@ -82,9 +82,14 @@ POST   /upload          — accept image uploads, create Job records, fire chord
 GET    /jobs            — list all jobs (ordered by created_at desc)
 GET    /jobs/{id}       — single job status
 PATCH  /jobs/{id}       — update style_group and/or image_type; emits job.reassigned WS event;
-                          auto-promotes NEEDS_REVIEW → ASSIGNED when style_group is set
+                          auto-promotes NEEDS_REVIEW → ASSIGNED when style_group is set;
+                          setting style_group=null resets job to NEEDS_REVIEW;
+                          changing image_type away from "duplicate" promotes DUPLICATE → ASSIGNED/NEEDS_REVIEW
 GET    /groups          — list GarmentGroups with their member jobs
 GET    /groups/{id}     — single group with member jobs
+POST   /groups          — create a new empty group; emits group.created WS event
+PATCH  /groups/{id}     — rename style_name and/or style_number; cascades style_group rename to member Jobs; emits group.updated
+DELETE /groups/{id}     — delete group; moves all member jobs back to NEEDS_REVIEW; emits group.deleted
 GET    /health          — liveness check
 WS     /ws              — WebSocket for real-time pipeline events (push-only; clients send to detect disconnect)
 ```
@@ -94,7 +99,6 @@ Static file mounts: `/uploads/*` and `/processed/*`
 ### Planned (not yet built)
 
 ```
-PATCH  /groups/{id}     — update group (manual reclassification)
 GET    /slides          — list slides
 PATCH  /slides/{id}     — edit slide fields before export
 GET    /export/pptx     — trigger PPT generation, return file
@@ -115,7 +119,8 @@ catalog-builder/
 │   ├── api/
 │   │   ├── routes/
 │   │   │   ├── upload.py        ← POST /upload (chord dispatch)
-│   │   │   ├── jobs.py          ← GET /jobs, GET /jobs/{id}
+│   │   │   ├── jobs.py          ← GET /jobs, GET /jobs/{id}, PATCH /jobs/{id}
+│   │   │   ├── groups.py        ← GET/POST /groups, GET/PATCH/DELETE /groups/{id}
 │   │   │   └── ws.py            ← WS /ws endpoint
 │   │   └── ws/
 │   │       └── manager.py       ← ConnectionManager + redis_subscriber (started on FastAPI startup)
@@ -167,13 +172,16 @@ Workers can't touch FastAPI's WebSocket list (separate process). Bridge: workers
 | `job.status` | every pipeline task | `job_id`, `status`, `image_type`, `style_group` |
 | `group.complete` | `assign_to_slide` | `group_id`, `group` (style_name), `has_front/back/detail/spec` |
 | `job.reassigned` | `PATCH /jobs/{id}` | `job_id`, `from_group`, `to_group` (null = moved to tray), `image_type`, `status`, `original_path`, `processed_path` |
+| `group.created` | `POST /groups` | `group_id`, `style_name`, `style_number` |
+| `group.updated` | `PATCH /groups/{id}` | `group_id`, `style_name`, `style_number`, `old_name` |
+| `group.deleted` | `DELETE /groups/{id}` | `group_id`, `style_name` |
 
 ## Frontend Architecture
 
 ### Canvas (interactive grouping view)
-- `Canvas.jsx` — pan/zoom canvas; pan with **mouse drag** on background, zoom with scroll wheel
+- `Canvas.jsx` — pan/zoom canvas; pan with **mouse drag** on background, zoom with scroll wheel; contains `NewGroupButton` (top-left) which expands inline to an input — Enter or "Create" calls `POST /groups`
 - `GroupCard.jsx` — drag header to reposition card; **click without moving** (< 3px) fires `onGroupClick` to open GroupModal; drop zone via `@dnd-kit/core`
-- `GroupModal.jsx` — full-screen overlay listing all jobs in a group; clicking an image thumbnail opens ImageModal; Esc closes
+- `GroupModal.jsx` — full-screen overlay listing all jobs in a group; click group name to inline-rename (PATCH /groups/{id}); trash icon with confirmation step to delete group; clicking an image thumbnail opens ImageModal; Esc closes (or cancels rename/delete confirmation if in progress)
 - `ImageThumbnail.jsx` — draggable chip via `useDraggable`; passes `{ job, groupId }` as drag data; **click (no drag)** opens ImageModal
 - `ImageModal.jsx` — shows full image + current role; lets user change `image_type` via PATCH; Esc closes
 - `Tray.jsx` — sidebar for jobs not yet in any group; also a `useDroppable` with `id="tray"`
@@ -186,6 +194,10 @@ Both `useJobs` and `useGroups` start empty and never auto-load DB history:
 - Items arrive via WS events or explicit upload responses only
 - On WS reconnect, only re-fetch IDs already known in local state (`knownIds.size > 0` guard)
 - Apply this same pattern to any new data hook to keep the UI session-scoped
+
+`useGroups` exposes `createGroup(name)`, `renameGroup(groupId, newName)`, `deleteGroup(groupId)` — each calls the REST API and updates local state optimistically. Also handles `group.created`, `group.updated`, `group.deleted` WS events (for multi-tab sync).
+
+`useJobs` handles `group.deleted` — resets all in-memory jobs whose `style_group` matches the deleted group's `style_name` to `NEEDS_REVIEW`.
 
 ## Dev Commands
 

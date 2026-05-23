@@ -57,13 +57,18 @@ def patch_job(job_id: str, body: PatchJobBody, db: Session = Depends(get_db)):
 
     if "style_group" in body.model_fields_set:
         job.style_group = body.style_group
-        # Promote a NEEDS_REVIEW job when the user manually assigns it to a group.
-        # Use ASSIGNED (not GROUPED) so assign_to_slide treats it as terminal,
-        # not as in-flight work waiting for a process_image task.
         if body.style_group is not None and job.status == "NEEDS_REVIEW":
+            # Promote a NEEDS_REVIEW job when the user manually assigns it to a group.
+            # Use ASSIGNED (not GROUPED) so assign_to_slide treats it as terminal,
+            # not as in-flight work waiting for a process_image task.
             job.status = "ASSIGNED"
+        elif body.style_group is None:
+            job.status = "NEEDS_REVIEW"
     if body.image_type is not None:
         job.image_type = body.image_type
+        # Promote out of DUPLICATE when user assigns a real role.
+        if body.image_type != "duplicate" and job.status == "DUPLICATE":
+            job.status = "ASSIGNED" if job.style_group else "NEEDS_REVIEW"
 
     db.commit()
     db.refresh(job)

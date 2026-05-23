@@ -23,7 +23,7 @@ export default function App() {
   const [selectedGroup, setSelectedGroup] = useState(null)
 
   const { jobs, handleEvent: handleJobEvent, addJobs, fetchAll: fetchJobs } = useJobs()
-  const { groups, handleEvent: handleGroupEvent, fetchAll: fetchGroups, moveJob } = useGroups()
+  const { groups, handleEvent: handleGroupEvent, fetchAll: fetchGroups, moveJob, createGroup, renameGroup, deleteGroup } = useGroups()
 
   // Allow drag only after 8px of movement — short taps fire onClick on ImageThumbnail
   const sensors = useSensors(
@@ -138,6 +138,7 @@ export default function App() {
                     liveJobs={jobs}
                     onImageClick={setSelectedJob}
                     onGroupClick={setSelectedGroup}
+                    onCreateGroup={createGroup}
                   />
                   <Tray trayJobs={trayJobs} onImageClick={setSelectedJob} />
                 </>
@@ -178,6 +179,14 @@ export default function App() {
           liveJobs={jobs}
           onClose={() => setSelectedGroup(null)}
           onImageClick={setSelectedJob}
+          onRename={async (groupId, newName) => {
+            const updated = await renameGroup(groupId, newName)
+            setSelectedGroup(updated)
+          }}
+          onDelete={async (groupId) => {
+            await deleteGroup(groupId)
+            setSelectedGroup(null)
+          }}
         />
       )}
     </DndContext>
