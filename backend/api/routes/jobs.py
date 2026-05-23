@@ -6,6 +6,7 @@ from datetime import datetime
 from pydantic import BaseModel
 from models.database import get_db
 from models.job import Job
+from pipeline.events import emit
 
 router = APIRouter()
 
@@ -39,3 +40,38 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+class PatchJobBody(BaseModel):
+    style_group: Optional[str] = None
+    image_type: Optional[str] = None
+
+
+@router.patch("/jobs/{job_id}")
+def patch_job(job_id: str, body: PatchJobBody, db: Session = Depends(get_db)):
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    old_group = job.style_group
+
+    if "style_group" in body.model_fields_set:
+        job.style_group = body.style_group
+    if body.image_type is not None:
+        job.image_type = body.image_type
+
+    db.commit()
+    db.refresh(job)
+
+    emit("job.reassigned", {
+        "job_id": job.id,
+        "from_group": old_group,
+        "to_group": job.style_group,
+        "image_type": job.image_type,
+        "filename": job.filename,
+        "status": job.status,
+        "original_path": job.original_path,
+        "processed_path": job.processed_path,
+    })
+
+    return {"ok": True, "job_id": job.id, "style_group": job.style_group}

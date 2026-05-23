@@ -12,7 +12,7 @@ A full-stack automated garment catalog builder built as a job application projec
   - `google/gemini-2.0-flash-lite-001` for per-image classification
   - `google/gemini-2.5-flash` for visual batch grouping and spec extraction
 - **PPT generation:** python-pptx (planned)
-- **Frontend:** React 18 + Tailwind CSS (scaffold exists; components not yet built)
+- **Frontend:** React 18 + Tailwind CSS + `@dnd-kit/core` (interactive canvas view)
 - **Infra:** Docker Compose (5 services: redis, api, worker, flower, frontend)
 
 ## Pipeline — Current Architecture
@@ -81,6 +81,9 @@ After grouping: `front`, `back`, `detail`, `spec`, or `duplicate`
 POST   /upload          — accept image uploads, create Job records, fire chord
 GET    /jobs            — list all jobs (ordered by created_at desc)
 GET    /jobs/{id}       — single job status
+PATCH  /jobs/{id}       — update style_group / image_type; emits job.reassigned WS event
+GET    /groups          — list GarmentGroups with their member jobs
+GET    /groups/{id}     — single group with member jobs
 GET    /health          — liveness check
 WS     /ws              — WebSocket for real-time pipeline events (push-only; clients send to detect disconnect)
 ```
@@ -90,7 +93,6 @@ Static file mounts: `/uploads/*` and `/processed/*`
 ### Planned (not yet built)
 
 ```
-GET    /groups          — list garment groups
 PATCH  /groups/{id}     — update group (manual reclassification)
 GET    /slides          — list slides
 PATCH  /slides/{id}     — edit slide fields before export
@@ -131,14 +133,53 @@ catalog-builder/
 │       ├── uploads/             ← raw incoming images
 │       ├── processed/           ← cleaned + resized images
 │       └── output/              ← final Catalog.pptx (planned)
-└── frontend/                    ← scaffold exists (React 18 + Tailwind); src/components/ and src/hooks/ are empty
+└── frontend/
+    ├── src/
+    │   ├── App.jsx              ← root; DndContext lives here so Canvas + Tray share one drag context
+    │   ├── components/
+    │   │   ├── Canvas.jsx       ← infinite pan/zoom canvas (mouse drag = pan, scroll = zoom)
+    │   │   ├── GroupCard.jsx    ← repositionable group card + @dnd-kit drop zone
+    │   │   ├── ImageThumbnail.jsx ← draggable image chip (@dnd-kit useDraggable)
+    │   │   ├── Tray.jsx         ← sidebar of unassigned jobs; also a drop target
+    │   │   ├── PipelineGrid.jsx ← monitoring view (status grid)
+    │   │   ├── SlideReview.jsx
+    │   │   ├── UploadPanel.jsx
+    │   │   ├── Header.jsx
+    │   │   ├── JobCard.jsx
+    │   │   └── StatusBadge.jsx
+    │   └── hooks/
+    │       ├── useGroups.js     ← group state; session-scoped (starts empty, grows via WS)
+    │       ├── useJobs.js       ← job state; session-scoped (same pattern)
+    │       └── useWebSocket.js  ← shared WS connection with auto-reconnect
 ```
 
 ## Real-time Events
 
 Workers can't touch FastAPI's WebSocket list (separate process). Bridge: workers call `pipeline/events.py:emit()` → Redis pub/sub channel `catalog:events` → `api/ws/manager.py:redis_subscriber()` (started as `asyncio.create_task` on FastAPI startup) → broadcasts to all connected WS clients.
 
-Event shape: `{"event": "job.status", "job_id": ..., "status": ..., ...}`
+### WebSocket event catalogue
+
+| Event | Emitted by | Payload highlights |
+|---|---|---|
+| `job.status` | every pipeline task | `job_id`, `status`, `image_type`, `style_group` |
+| `group.complete` | `assign_to_slide` | `group_id`, `group` (style_name), `has_front/back/detail/spec` |
+| `job.reassigned` | `PATCH /jobs/{id}` | `job_id`, `from_group`, `to_group`, `image_type` |
+
+## Frontend Architecture
+
+### Canvas (interactive grouping view)
+- `Canvas.jsx` — pan/zoom canvas; pan with **mouse drag** on background, zoom with scroll wheel
+- `GroupCard.jsx` — drag header to reposition card; drop zone via `@dnd-kit/core`
+- `ImageThumbnail.jsx` — draggable chip via `useDraggable`; passes `{ job, groupId }` as drag data
+- `Tray.jsx` — sidebar for jobs not yet in any group; also a `useDroppable` with `id="tray"`
+- `DndContext` must be in `App.jsx` (parent of both Canvas and Tray) so sibling components share the same drag context
+- Canvas uses **mouse events** for pan — avoids conflict with `@dnd-kit` which uses pointer events
+
+### Session-scoping pattern for data hooks
+Both `useJobs` and `useGroups` start empty and never auto-load DB history:
+- Items arrive via WS events or explicit upload responses only
+- On WS reconnect, only re-fetch IDs already known in local state (`knownIds.size > 0` guard)
+- Apply this same pattern to any new data hook to keep the UI session-scoped
 
 ## Dev Commands
 
@@ -175,6 +216,16 @@ Key variables: `OPENROUTER_API_KEY`, `REDIS_URL`, `DATABASE_URL`, `CELERY_BROKER
 
 ### Docker / Python logging
 - Python stdout is block-buffered in Docker — `print()` inside long-running async tasks may not appear in `docker compose logs`. Use `print(..., flush=True)` or add `ENV PYTHONUNBUFFERED=1` to Dockerfile.
+
+### Image path → URL conversion
+- Paths in DB: `storage/uploads/<id>.jpg` / `storage/processed/<id>.jpg`
+- Static mounts serve at `/uploads/` and `/processed/` — no `storage/` prefix
+- Always strip it: `path.replace(/^storage\//, '')` — see `JobCard.jsx:imgUrl()` for the canonical helper
+
+### Adding npm packages to the frontend container
+- `docker compose build frontend` bakes packages into the image, but `docker compose up` reuses the old anonymous `node_modules` volume from the previous container
+- After a rebuild that adds packages: `docker compose exec frontend npm install`
+- The anonymous volume is declared as `/app/node_modules` in docker-compose.yml to prevent the host mount from wiping installed packages
 
 ### Frontend (React dev)
 - React StrictMode mounts effects twice → two WS connections briefly (`total=2` in API logs). Normal in dev; only one persists.
