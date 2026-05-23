@@ -30,7 +30,7 @@ ELIGIBLE  = {"PROCESSED", "SPEC_EXTRACTED", "ASSIGNED"}
 
 
 @celery_app.task(bind=True, name="assign_to_slide", max_retries=10, default_retry_delay=5)
-def assign_to_slide(self, _chord_results, canonical_name: str):
+def assign_to_slide(self, _chord_results, canonical_name: str, batch_job_ids: list = None):
     """
     Assemble a GarmentGroup + Slide for *canonical_name*.
 
@@ -38,12 +38,38 @@ def assign_to_slide(self, _chord_results, canonical_name: str):
     is used as a chord callback. It is intentionally ignored.
 
     Args:
-        canonical_name: The value written to Job.style_group by visual_group_images.
+        canonical_name:  The value written to Job.style_group by visual_group_images.
+        batch_job_ids:   The exact job IDs grouped in this pipeline run. Any other
+                         jobs sharing the same canonical_name (from a prior run) are
+                         evicted so they don't appear as duplicates in the group card.
     """
     logger.info("assign_to_slide: starting for group=%s", canonical_name)
 
     db = SessionLocal()
     try:
+        # ------------------------------------------------------------------
+        # 0. Evict stale jobs from a previous pipeline run that share this
+        #    canonical name. Without this, uploading similar images twice would
+        #    accumulate jobs from both runs inside the same group card.
+        # ------------------------------------------------------------------
+        if batch_job_ids:
+            stale = (
+                db.query(Job)
+                .filter(
+                    Job.style_group == canonical_name,
+                    Job.id.notin_(batch_job_ids),
+                )
+                .all()
+            )
+            for s in stale:
+                s.style_group = None
+            if stale:
+                db.flush()
+                logger.info(
+                    "assign_to_slide: evicted %d stale job(s) from prior run of group=%s",
+                    len(stale), canonical_name,
+                )
+
         # ------------------------------------------------------------------
         # 1. Load all jobs that belong to this group
         # ------------------------------------------------------------------

@@ -33,7 +33,7 @@ services:
   # Scale horizontally with: docker compose up --scale worker=3
   worker:
     build: ./backend
-    command: celery -A celery_app worker --loglevel=info --concurrency=2
+    command: celery -A celery_app worker --loglevel=info --concurrency=8
     volumes:
       - ./backend:/app
     depends_on:

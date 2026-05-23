@@ -37,27 +37,49 @@ export function useJobs() {
   }, [])
 
   const handleEvent = useCallback((event) => {
-    if (event.event !== 'job.status') return
-    setJobs(prev => {
-      // Accept events even if the job isn't in state yet — Celery can
-      // emit status changes before the upload response resolves.
-      const existing = prev[event.job_id] ?? {}
-      return {
-        ...prev,
-        [event.job_id]: {
-          ...existing,
-          id:             event.job_id,
-          status:         event.status,
-          image_type:     event.image_type     ?? existing.image_type,
-          style_group:    event.style_group    ?? existing.style_group,
-          original_path:  event.original_path  ?? existing.original_path,
-          processed_path: event.processed_path ?? existing.processed_path,
-          filename:       event.filename       ?? existing.filename,
-          confidence:     event.confidence     ?? existing.confidence,
-          spec_data:      event.spec_data      ?? existing.spec_data,
-        },
-      }
-    })
+    if (event.event === 'job.status') {
+      setJobs(prev => {
+        // Only update jobs that belong to this session. Old queued Celery tasks
+        // from prior sessions can emit events after a worker restart; ignore them
+        // to prevent blank ghost cards from appearing on the canvas.
+        if (!prev[event.job_id]) return prev
+        const existing = prev[event.job_id]
+        return {
+          ...prev,
+          [event.job_id]: {
+            ...existing,
+            id:             event.job_id,
+            status:         event.status,
+            image_type:     event.image_type     ?? existing.image_type,
+            style_group:    event.style_group    ?? existing.style_group,
+            original_path:  event.original_path  ?? existing.original_path,
+            processed_path: event.processed_path ?? existing.processed_path,
+            filename:       event.filename       ?? existing.filename,
+            confidence:     event.confidence     ?? existing.confidence,
+            spec_data:      event.spec_data      ?? existing.spec_data,
+          },
+        }
+      })
+    } else if (event.event === 'job.reassigned') {
+      // Fired when a job is moved between groups or its role (image_type) is changed.
+      // Update the in-memory job so role badges and group views stay in sync.
+      setJobs(prev => {
+        const existing = prev[event.job_id]
+        if (!existing) return prev
+        return {
+          ...prev,
+          [event.job_id]: {
+            ...existing,
+            // to_group can legitimately be null (moved to tray), so check for undefined
+            style_group:    event.to_group    !== undefined ? event.to_group    : existing.style_group,
+            image_type:     event.image_type  !== undefined ? event.image_type  : existing.image_type,
+            status:         event.status      ?? existing.status,
+            original_path:  event.original_path  ?? existing.original_path,
+            processed_path: event.processed_path ?? existing.processed_path,
+          },
+        }
+      })
+    }
   }, [])
 
   // Sync current job states from the server — called on WS connect/reconnect

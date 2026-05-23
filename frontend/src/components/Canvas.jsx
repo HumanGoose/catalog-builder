@@ -14,7 +14,7 @@ function autoPos(idx) {
   return { x: 40 + col * (CARD_W + CARD_GAP), y: 40 + row * 310 }
 }
 
-export function Canvas({ groups, liveJobs }) {
+export function Canvas({ groups, liveJobs, onImageClick, onGroupClick }) {
   const [offset, setOffset] = useState({ x: 40, y: 40 })
   const [scale, setScale] = useState(1)
   const [cardPositions, setCardPositions] = useState({})
@@ -124,6 +124,8 @@ export function Canvas({ groups, liveJobs }) {
               position={pos}
               scale={scale}
               onMoveCard={(dx, dy) => onMoveCard(group.id, dx, dy)}
+              onGroupClick={onGroupClick}
+              onImageClick={onImageClick}
             />
           )
         })}

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { DndContext, DragOverlay, pointerWithin } from '@dnd-kit/core'
+import { DndContext, DragOverlay, pointerWithin, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { Header } from './components/Header.jsx'
 import { UploadPanel } from './components/UploadPanel.jsx'
 import { PipelineGrid } from './components/PipelineGrid.jsx'
@@ -7,6 +7,8 @@ import { SlideReview } from './components/SlideReview.jsx'
 import { Canvas } from './components/Canvas.jsx'
 import { Tray } from './components/Tray.jsx'
 import { ImageThumbnail } from './components/ImageThumbnail.jsx'
+import { ImageModal } from './components/ImageModal.jsx'
+import { GroupModal } from './components/GroupModal.jsx'
 import { useWebSocket } from './hooks/useWebSocket.js'
 import { useJobs } from './hooks/useJobs.js'
 import { useGroups } from './hooks/useGroups.js'
@@ -17,11 +19,17 @@ export default function App() {
   const [view, setView] = useState('canvas')
   const [filter, setFilter] = useState('ALL')
   const [activeJob, setActiveJob] = useState(null)
+  const [selectedJob, setSelectedJob] = useState(null)
+  const [selectedGroup, setSelectedGroup] = useState(null)
 
   const { jobs, handleEvent: handleJobEvent, addJobs, fetchAll: fetchJobs } = useJobs()
   const { groups, handleEvent: handleGroupEvent, fetchAll: fetchGroups, moveJob } = useGroups()
 
-  // Both hooks share the same WebSocket connection via a combined handler
+  // Allow drag only after 8px of movement — short taps fire onClick on ImageThumbnail
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  )
+
   const handleEvent = useCallback((event) => {
     handleJobEvent(event)
     handleGroupEvent(event)
@@ -34,7 +42,6 @@ export default function App() {
   const connected = useWebSocket(handleEvent, fetchAll)
   const jobCount = Object.keys(jobs).length
 
-  // Jobs not yet assigned to any group card (shown in the tray)
   const groupedJobIds = new Set(
     Object.values(groups).flatMap(g => g.jobs.map(j => j.id))
   )
@@ -55,10 +62,8 @@ export default function App() {
 
     if (!job || fromGroupId === toGroupId) return
 
-    // Optimistic update — canvas updates instantly
     moveJob(job, fromGroupId, toGroupId)
 
-    // Persist + broadcast via WebSocket (job.reassigned → all tabs update)
     const targetStyleGroup = toGroupId === 'tray'
       ? null
       : groups[toGroupId]?.style_name ?? null
@@ -70,7 +75,6 @@ export default function App() {
         body: JSON.stringify({ style_group: targetStyleGroup }),
       })
     } catch {
-      // Backend call failed — resync from server
       fetchGroups()
     }
   }
@@ -81,6 +85,7 @@ export default function App() {
 
   return (
     <DndContext
+      sensors={sensors}
       collisionDetection={pointerWithin}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -103,7 +108,6 @@ export default function App() {
 
           {/* Center: Canvas or Pipeline */}
           <main style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            {/* Tab bar */}
             <div style={{
               display: 'flex', borderBottom: '1px solid var(--border)',
               padding: '0 16px', flexShrink: 0,
@@ -129,8 +133,13 @@ export default function App() {
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
               {view === 'canvas' ? (
                 <>
-                  <Canvas groups={groups} liveJobs={jobs} />
-                  <Tray trayJobs={trayJobs} />
+                  <Canvas
+                    groups={groups}
+                    liveJobs={jobs}
+                    onImageClick={setSelectedJob}
+                    onGroupClick={setSelectedGroup}
+                  />
+                  <Tray trayJobs={trayJobs} onImageClick={setSelectedJob} />
                 </>
               ) : (
                 <PipelineGrid jobs={jobs} filter={filter} onFilterChange={setFilter} />
@@ -148,10 +157,29 @@ export default function App() {
         </div>
       </div>
 
-      {/* Drag overlay — renders outside the canvas transform, in screen space */}
+      {/* Drag overlay */}
       <DragOverlay dropAnimation={null}>
         {activeJob ? <ImageThumbnail job={activeJob} groupId={null} isOverlay /> : null}
       </DragOverlay>
+
+      {/* Image detail + role edit modal */}
+      {selectedJob && (
+        <ImageModal
+          job={selectedJob}
+          onClose={() => setSelectedJob(null)}
+          onSaved={() => {}}
+        />
+      )}
+
+      {/* Group expand modal */}
+      {selectedGroup && (
+        <GroupModal
+          group={selectedGroup}
+          liveJobs={jobs}
+          onClose={() => setSelectedGroup(null)}
+          onImageClick={setSelectedJob}
+        />
+      )}
     </DndContext>
   )
 }

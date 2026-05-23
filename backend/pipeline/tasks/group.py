@@ -212,8 +212,9 @@ def visual_group_images(self, classify_results, job_ids: list):
                     per_job_sigs.append(process_image.s(job.id))
 
             if per_job_sigs:
+                batch_ids = [j.id for j in group_jobs]
                 chord(per_job_sigs)(
-                    assign_to_slide.s(canonical_name)
+                    assign_to_slide.s(canonical_name, batch_ids)
                 )
 
         db.commit()
