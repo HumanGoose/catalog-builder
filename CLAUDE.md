@@ -81,7 +81,8 @@ After grouping: `front`, `back`, `detail`, `spec`, or `duplicate`
 POST   /upload          — accept image uploads, create Job records, fire chord
 GET    /jobs            — list all jobs (ordered by created_at desc)
 GET    /jobs/{id}       — single job status
-PATCH  /jobs/{id}       — update style_group / image_type; emits job.reassigned WS event
+PATCH  /jobs/{id}       — update style_group and/or image_type; emits job.reassigned WS event;
+                          auto-promotes NEEDS_REVIEW → ASSIGNED when style_group is set
 GET    /groups          — list GarmentGroups with their member jobs
 GET    /groups/{id}     — single group with member jobs
 GET    /health          — liveness check
@@ -138,8 +139,10 @@ catalog-builder/
     │   ├── App.jsx              ← root; DndContext lives here so Canvas + Tray share one drag context
     │   ├── components/
     │   │   ├── Canvas.jsx       ← infinite pan/zoom canvas (mouse drag = pan, scroll = zoom)
-    │   │   ├── GroupCard.jsx    ← repositionable group card + @dnd-kit drop zone
-    │   │   ├── ImageThumbnail.jsx ← draggable image chip (@dnd-kit useDraggable)
+    │   │   ├── GroupCard.jsx    ← repositionable group card + @dnd-kit drop zone; click header (no drag) → GroupModal
+    │   │   ├── GroupModal.jsx   ← expand modal: shows all jobs in a group with role badges; Esc to close
+    │   │   ├── ImageThumbnail.jsx ← draggable chip (@dnd-kit useDraggable); click (no drag) → ImageModal
+    │   │   ├── ImageModal.jsx   ← image detail + role editor; PATCH /jobs/{id} on save; Esc to close
     │   │   ├── Tray.jsx         ← sidebar of unassigned jobs; also a drop target
     │   │   ├── PipelineGrid.jsx ← monitoring view (status grid)
     │   │   ├── SlideReview.jsx
@@ -163,17 +166,20 @@ Workers can't touch FastAPI's WebSocket list (separate process). Bridge: workers
 |---|---|---|
 | `job.status` | every pipeline task | `job_id`, `status`, `image_type`, `style_group` |
 | `group.complete` | `assign_to_slide` | `group_id`, `group` (style_name), `has_front/back/detail/spec` |
-| `job.reassigned` | `PATCH /jobs/{id}` | `job_id`, `from_group`, `to_group`, `image_type` |
+| `job.reassigned` | `PATCH /jobs/{id}` | `job_id`, `from_group`, `to_group` (null = moved to tray), `image_type`, `status`, `original_path`, `processed_path` |
 
 ## Frontend Architecture
 
 ### Canvas (interactive grouping view)
 - `Canvas.jsx` — pan/zoom canvas; pan with **mouse drag** on background, zoom with scroll wheel
-- `GroupCard.jsx` — drag header to reposition card; drop zone via `@dnd-kit/core`
-- `ImageThumbnail.jsx` — draggable chip via `useDraggable`; passes `{ job, groupId }` as drag data
+- `GroupCard.jsx` — drag header to reposition card; **click without moving** (< 3px) fires `onGroupClick` to open GroupModal; drop zone via `@dnd-kit/core`
+- `GroupModal.jsx` — full-screen overlay listing all jobs in a group; clicking an image thumbnail opens ImageModal; Esc closes
+- `ImageThumbnail.jsx` — draggable chip via `useDraggable`; passes `{ job, groupId }` as drag data; **click (no drag)** opens ImageModal
+- `ImageModal.jsx` — shows full image + current role; lets user change `image_type` via PATCH; Esc closes
 - `Tray.jsx` — sidebar for jobs not yet in any group; also a `useDroppable` with `id="tray"`
 - `DndContext` must be in `App.jsx` (parent of both Canvas and Tray) so sibling components share the same drag context
 - Canvas uses **mouse events** for pan — avoids conflict with `@dnd-kit` which uses pointer events
+- `PointerSensor` has `activationConstraint: { distance: 8 }` — prevents drag from firing on short taps, so onClick handlers work reliably
 
 ### Session-scoping pattern for data hooks
 Both `useJobs` and `useGroups` start empty and never auto-load DB history:
@@ -230,3 +236,8 @@ Key variables: `OPENROUTER_API_KEY`, `REDIS_URL`, `DATABASE_URL`, `CELERY_BROKER
 ### Frontend (React dev)
 - React StrictMode mounts effects twice → two WS connections briefly (`total=2` in API logs). Normal in dev; only one persists.
 - If hooks change order between HMR updates (e.g. adding/removing `useEffect`), React throws a hook-order error. Fix: hard refresh (Ctrl+Shift+R) to clear HMR state.
+
+### useJobs status ranking
+- `useJobs` maintains a `STATUS_RANK` map. When merging a new update, it keeps whichever status is further along the pipeline. This prevents the upload response (`status=UPLOADED`) from clobbering a status that arrived via WebSocket before the HTTP response returned.
+- `handleEvent` for `job.status` silently ignores events for job IDs not already in local state — prevents ghost cards from stale Celery tasks left over from a previous worker session.
+- `job.reassigned` payload: `to_group` is `null` when a job is moved to the tray (not `undefined`). The handler checks `!== undefined` rather than truthiness so null is applied correctly.
