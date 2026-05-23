@@ -46,19 +46,29 @@ async def redis_subscriber():
     """
     Background task: subscribe to the Redis channel and forward every
     message to all connected WebSocket clients.
-    Started once on FastAPI startup.
+    Reconnects automatically if the connection drops.
     """
     url = os.getenv("REDIS_URL", "redis://redis:6379")
-    r = aioredis.from_url(url)
-    pubsub = r.pubsub()
-    await pubsub.subscribe(CHANNEL)
-    print(f"[WS] subscribed to Redis channel: {CHANNEL}")
-
-    async for message in pubsub.listen():
-        if message["type"] != "message":
-            continue
+    while True:
         try:
-            data = json.loads(message["data"])
-            await manager.broadcast(data)
+            r = aioredis.from_url(url)
+            pubsub = r.pubsub()
+            await pubsub.subscribe(CHANNEL)
+            print(f"[WS] subscribed to Redis channel: {CHANNEL}")
+
+            async for message in pubsub.listen():
+                if message["type"] != "message":
+                    continue
+                try:
+                    data = json.loads(message["data"])
+                    print(f"[WS] received event: {data.get('event')} job={data.get('job_id')} clients={len(manager.active)}", flush=True)
+                    await manager.broadcast(data)
+                except Exception as e:
+                    print(f"[WS] broadcast error: {e}")
+
+        except asyncio.CancelledError:
+            print("[WS] subscriber shutting down")
+            raise
         except Exception as e:
-            print(f"[WS] broadcast error: {e}")
+            print(f"[WS] subscriber lost connection ({e}), reconnecting in 2s")
+            await asyncio.sleep(2)

@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -8,7 +9,20 @@ from api.routes import upload, jobs
 from api.routes.ws import router as ws_router
 from api.ws.manager import redis_subscriber
 
-app = FastAPI(title="Alaiy Catalog Builder")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    task = asyncio.create_task(redis_subscriber())
+    yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+app = FastAPI(title="Alaiy Catalog Builder", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -17,12 +31,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@app.on_event("startup")
-async def startup():
-    Base.metadata.create_all(bind=engine)
-    # Start the Redis → WebSocket subscriber as a background task
-    asyncio.create_task(redis_subscriber())
 
 app.mount("/uploads", StaticFiles(directory="storage/uploads"), name="uploads")
 app.mount("/processed", StaticFiles(directory="storage/processed"), name="processed")

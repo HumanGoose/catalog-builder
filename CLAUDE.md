@@ -164,3 +164,18 @@ docker compose build api
 Copy `.env.example` to `.env` and fill in values. Never commit `.env`.
 
 Key variables: `OPENROUTER_API_KEY`, `REDIS_URL`, `DATABASE_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`
+
+## Dev Quirks & Gotchas
+
+### WebSocket / Redis subscriber
+- `asyncio.create_task(redis_subscriber())` tasks are killed by uvicorn `--reload` on every file save. The subscriber must have a `while True` retry loop and re-raise `asyncio.CancelledError` to be resilient.
+- Use `lifespan` context manager (not deprecated `@app.on_event("startup")`) — it properly cancels background tasks on shutdown.
+- Verify subscription is live: `docker compose exec redis redis-cli pubsub numsub catalog:events` → should return `1` while API is up.
+- Publish a test event: `docker compose exec redis redis-cli publish catalog:events '{"event":"job.status","job_id":"test","status":"CLASSIFYING"}'`
+
+### Docker / Python logging
+- Python stdout is block-buffered in Docker — `print()` inside long-running async tasks may not appear in `docker compose logs`. Use `print(..., flush=True)` or add `ENV PYTHONUNBUFFERED=1` to Dockerfile.
+
+### Frontend (React dev)
+- React StrictMode mounts effects twice → two WS connections briefly (`total=2` in API logs). Normal in dev; only one persists.
+- If hooks change order between HMR updates (e.g. adding/removing `useEffect`), React throws a hook-order error. Fix: hard refresh (Ctrl+Shift+R) to clear HMR state.

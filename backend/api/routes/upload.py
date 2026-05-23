@@ -52,5 +52,5 @@ async def upload_images(
 
     return {
         "uploaded": len(created_jobs),
-        "jobs": [{"id": j.id, "filename": j.filename, "status": j.status} for j in created_jobs]
+        "jobs": [{"id": j.id, "filename": j.filename, "status": j.status, "original_path": j.original_path} for j in created_jobs]
     }
