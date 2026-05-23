@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
     gcc \
     libglib2.0-0 \
     libgl1 \
+    libreoffice-impress \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

@@ -94,7 +94,7 @@ function autoPos(idx) {
   return { x: 40 + col * (CARD_W + CARD_GAP), y: 40 + row * 310 }
 }
 
-export function Canvas({ groups, liveJobs, onImageClick, onGroupClick, onCreateGroup }) {
+export function Canvas({ groups, liveJobs, onImageClick, onGroupClick, onCreateGroup, slideCount, onOpenCatalog }) {
   const [offset, setOffset] = useState({ x: 40, y: 40 })
   const [scale, setScale] = useState(1)
   const [cardPositions, setCardPositions] = useState({})
@@ -178,6 +178,37 @@ export function Canvas({ groups, liveJobs, onImageClick, onGroupClick, onCreateG
       }}
     >
       <NewGroupButton onCreate={onCreateGroup} />
+
+      {/* Generate Catalog button — top-right, outside the world transform */}
+      {slideCount > 0 && (
+        <button
+          onClick={onOpenCatalog}
+          style={{
+            position: 'absolute', top: 12, right: 12, zIndex: 20,
+            background: 'rgba(196,150,106,0.08)',
+            border: '1.5px solid rgba(196,150,106,0.35)',
+            borderRadius: 6, color: 'var(--gold)',
+            fontSize: 11, fontWeight: 600,
+            padding: '5px 12px', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 6,
+            fontFamily: '"DM Mono", monospace', letterSpacing: '0.06em',
+            transition: 'background 0.15s, border-color 0.15s',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'rgba(196,150,106,0.16)'
+            e.currentTarget.style.borderColor = 'rgba(196,150,106,0.6)'
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'rgba(196,150,106,0.08)'
+            e.currentTarget.style.borderColor = 'rgba(196,150,106,0.35)'
+          }}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>
+          </svg>
+          Catalog · {slideCount}
+        </button>
+      )}
 
       {/* Zoom hint */}
       <div style={{

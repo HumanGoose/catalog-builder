@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from models.database import engine, Base
 import models.job
-from api.routes import upload, jobs, groups
+from api.routes import upload, jobs, groups, export
 from api.routes.ws import router as ws_router
 from api.ws.manager import redis_subscriber
 
@@ -38,6 +38,7 @@ app.mount("/processed", StaticFiles(directory="storage/processed"), name="proces
 app.include_router(upload.router)
 app.include_router(jobs.router)
 app.include_router(groups.router)
+app.include_router(export.router)
 app.include_router(ws_router)
 
 @app.get("/health")

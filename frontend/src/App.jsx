@@ -4,6 +4,7 @@ import { Header } from './components/Header.jsx'
 import { UploadPanel } from './components/UploadPanel.jsx'
 import { PipelineGrid } from './components/PipelineGrid.jsx'
 import { SlideReview } from './components/SlideReview.jsx'
+import { CatalogView } from './components/CatalogView.jsx'
 import { Canvas } from './components/Canvas.jsx'
 import { Tray } from './components/Tray.jsx'
 import { ImageThumbnail } from './components/ImageThumbnail.jsx'
@@ -12,6 +13,7 @@ import { GroupModal } from './components/GroupModal.jsx'
 import { useWebSocket } from './hooks/useWebSocket.js'
 import { useJobs } from './hooks/useJobs.js'
 import { useGroups } from './hooks/useGroups.js'
+import { useSlides } from './hooks/useSlides.js'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -21,9 +23,11 @@ export default function App() {
   const [activeJob, setActiveJob] = useState(null)
   const [selectedJob, setSelectedJob] = useState(null)
   const [selectedGroup, setSelectedGroup] = useState(null)
+  const [catalogOpen, setCatalogOpen] = useState(false)
 
   const { jobs, handleEvent: handleJobEvent, addJobs, fetchAll: fetchJobs } = useJobs()
   const { groups, handleEvent: handleGroupEvent, fetchAll: fetchGroups, moveJob, createGroup, renameGroup, deleteGroup } = useGroups()
+  const { slides, handleEvent: handleSlideEvent, fetchAll: fetchSlides, updateSlide } = useSlides()
 
   // Allow drag only after 8px of movement — short taps fire onClick on ImageThumbnail
   const sensors = useSensors(
@@ -33,14 +37,16 @@ export default function App() {
   const handleEvent = useCallback((event) => {
     handleJobEvent(event)
     handleGroupEvent(event)
-  }, [handleJobEvent, handleGroupEvent])
+    handleSlideEvent(event)
+  }, [handleJobEvent, handleGroupEvent, handleSlideEvent])
 
   const fetchAll = useCallback(async () => {
-    await Promise.all([fetchJobs(), fetchGroups()])
-  }, [fetchJobs, fetchGroups])
+    await Promise.all([fetchJobs(), fetchGroups(), fetchSlides()])
+  }, [fetchJobs, fetchGroups, fetchSlides])
 
   const connected = useWebSocket(handleEvent, fetchAll)
   const jobCount = Object.keys(jobs).length
+  const slideCount = Object.keys(slides).length
 
   const groupedJobIds = new Set(
     Object.values(groups).flatMap(g => g.jobs.map(j => j.id))
@@ -139,6 +145,8 @@ export default function App() {
                     onImageClick={setSelectedJob}
                     onGroupClick={setSelectedGroup}
                     onCreateGroup={createGroup}
+                    slideCount={slideCount}
+                    onOpenCatalog={() => setCatalogOpen(true)}
                   />
                   <Tray trayJobs={trayJobs} onImageClick={setSelectedJob} />
                 </>
@@ -188,6 +196,49 @@ export default function App() {
             setSelectedGroup(null)
           }}
         />
+      )}
+
+      {/* Catalog preview modal */}
+      {catalogOpen && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 200,
+            background: 'rgba(0,0,0,0.88)',
+            display: 'flex', flexDirection: 'column',
+          }}
+          onKeyDown={e => { if (e.key === 'Escape') setCatalogOpen(false) }}
+          tabIndex={-1}
+        >
+          {/* Modal header */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 20px', borderBottom: '1px solid var(--border)',
+            background: 'var(--bg)', flexShrink: 0,
+          }}>
+            <span style={{
+              fontSize: 11, fontFamily: '"DM Mono", monospace',
+              letterSpacing: '0.12em', textTransform: 'uppercase',
+              color: 'var(--text-muted)',
+            }}>
+              Catalog Preview — {slideCount} slide{slideCount !== 1 ? 's' : ''}
+            </span>
+            <button
+              onClick={() => setCatalogOpen(false)}
+              style={{
+                background: 'none', border: '1px solid var(--border)',
+                borderRadius: 4, color: 'var(--text-muted)',
+                fontSize: 13, padding: '4px 10px', cursor: 'pointer',
+                fontFamily: '"DM Mono", monospace',
+              }}
+            >
+              Esc ✕
+            </button>
+          </div>
+          {/* Modal body */}
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            <CatalogView slides={slides} onSave={updateSlide} />
+          </div>
+        </div>
       )}
     </DndContext>
   )

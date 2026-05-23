@@ -126,6 +126,7 @@ def assign_to_slide(self, _chord_results, canonical_name: str, batch_job_ids: li
         fabric  = merged_spec.get("fabric")
         gsm     = merged_spec.get("gsm")
         date    = merged_spec.get("date")
+        afs     = merged_spec.get("afs")
         # Style name: prefer the canonical slug unless we have a real ref number
         style_name = ref_no or canonical_name
 
@@ -168,6 +169,7 @@ def assign_to_slide(self, _chord_results, canonical_name: str, batch_job_ids: li
         slide.fabric            = fabric
         slide.gsm               = str(gsm) if gsm is not None else None
         slide.date              = str(date) if date else None
+        slide.afs               = str(afs) if afs else None
         slide.front_image_path  = front_job.processed_path  if front_job  else None
         slide.back_image_path   = back_job.processed_path   if back_job   else None
         slide.detail_image_path = detail_job.processed_path if detail_job else None
