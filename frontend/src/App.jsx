@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { DndContext, DragOverlay, pointerWithin, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { Header } from './components/Header.jsx'
 import { UploadPanel } from './components/UploadPanel.jsx'
@@ -25,7 +25,7 @@ export default function App() {
   const [selectedGroup, setSelectedGroup] = useState(null)
   const [catalogOpen, setCatalogOpen] = useState(false)
 
-  const { jobs, handleEvent: handleJobEvent, addJobs, fetchAll: fetchJobs } = useJobs()
+  const { jobs, handleEvent: handleJobEvent, addJobs, fetchAll: fetchJobs, patchJob } = useJobs()
   const { groups, handleEvent: handleGroupEvent, fetchAll: fetchGroups, moveJob, createGroup, renameGroup, deleteGroup } = useGroups()
   const { slides, handleEvent: handleSlideEvent, fetchAll: fetchSlides, updateSlide } = useSlides()
 
@@ -47,6 +47,26 @@ export default function App() {
   const connected = useWebSocket(handleEvent, fetchAll)
   const jobCount = Object.keys(jobs).length
   const slideCount = Object.keys(slides).length
+
+  // Merge DB slide metadata with live job state so CatalogView reflects canvas moves
+  const liveSlides = useMemo(() => {
+    const result = {}
+    Object.entries(slides).forEach(([id, slide]) => {
+      const groupJobs = Object.values(jobs).filter(
+        j => j.style_group === slide.style_number && j.status === 'ASSIGNED'
+      )
+      const front  = groupJobs.find(j => j.image_type === 'front')
+      const back   = groupJobs.find(j => j.image_type === 'back')
+      const detail = groupJobs.find(j => j.image_type === 'detail')
+      result[id] = {
+        ...slide,
+        front_image_path:  front?.processed_path  ?? front?.original_path  ?? null,
+        back_image_path:   back?.processed_path   ?? back?.original_path   ?? null,
+        detail_image_path: detail?.processed_path ?? detail?.original_path ?? null,
+      }
+    })
+    return result
+  }, [slides, jobs])
 
   const groupedJobIds = new Set(
     Object.values(groups).flatMap(g => g.jobs.map(j => j.id))
@@ -73,6 +93,12 @@ export default function App() {
     const targetStyleGroup = toGroupId === 'tray'
       ? null
       : groups[toGroupId]?.style_name ?? null
+
+    // Optimistic update so SlideReview reflects the move immediately
+    const optimisticStatus = targetStyleGroup
+      ? (job.status === 'NEEDS_REVIEW' ? 'ASSIGNED' : job.status)
+      : 'NEEDS_REVIEW'
+    patchJob(job.id, { style_group: targetStyleGroup, status: optimisticStatus })
 
     try {
       await fetch(`${API}/jobs/${job.id}`, {
@@ -236,7 +262,7 @@ export default function App() {
           </div>
           {/* Modal body */}
           <div style={{ flex: 1, overflow: 'hidden' }}>
-            <CatalogView slides={slides} onSave={updateSlide} />
+            <CatalogView slides={liveSlides} onSave={updateSlide} />
           </div>
         </div>
       )}

@@ -108,5 +108,12 @@ export function useJobs() {
     } catch {}
   }, [addJobs])
 
-  return { jobs, handleEvent, addJobs, fetchAll }
+  const patchJob = useCallback((id, fields) => {
+    setJobs(prev => {
+      if (!prev[id]) return prev
+      return { ...prev, [id]: { ...prev[id], ...fields } }
+    })
+  }, [])
+
+  return { jobs, handleEvent, addJobs, fetchAll, patchJob }
 }

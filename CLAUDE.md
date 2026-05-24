@@ -253,3 +253,10 @@ Key variables: `OPENROUTER_API_KEY`, `REDIS_URL`, `DATABASE_URL`, `CELERY_BROKER
 - `useJobs` maintains a `STATUS_RANK` map. When merging a new update, it keeps whichever status is further along the pipeline. This prevents the upload response (`status=UPLOADED`) from clobbering a status that arrived via WebSocket before the HTTP response returned.
 - `handleEvent` for `job.status` silently ignores events for job IDs not already in local state — prevents ghost cards from stale Celery tasks left over from a previous worker session.
 - `job.reassigned` payload: `to_group` is `null` when a job is moved to the tray (not `undefined`). The handler checks `!== undefined` rather than truthiness so null is applied correctly.
+- `patchJob(id, fields)` — optimistic single-job update; bypasses STATUS_RANK, use for immediate UI feedback on drag before WS round-trip.
+
+### Slide ↔ Job matching
+- `slide.style_number` = canonical group slug — always matches `job.style_group`; use this for joins
+- `slide.style_name` = `ref_no or canonical_name` — can be overwritten with a spec reference number; do NOT use for matching jobs
+- `CatalogView` reads `slides` state (DB records written once by `assign_to_slide`). Manual job moves on the canvas don't update `Slide` records. Fix: compute `liveSlides` in `App.jsx` merging `slides` metadata with live image paths from `jobs` state, then pass `liveSlides` to `CatalogView`.
+- When computing `liveSlides`, fall back to `null` (not `slide.*_image_path`) if no live job found for a role — the DB path is stale when a job has been removed from the group.
