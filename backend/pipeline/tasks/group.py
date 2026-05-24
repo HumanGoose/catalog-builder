@@ -32,7 +32,7 @@ def visual_group_images(self, classify_results, job_ids: list):
     db = SessionLocal()
     try:
         jobs = db.query(Job).filter(Job.id.in_(job_ids)).all()
-        valid_jobs = [j for j in jobs if j.status == "CLASSIFIED"]
+        valid_jobs = [j for j in jobs if j.status in ("CLASSIFIED", "GROUPING")]
 
         if not valid_jobs:
             return {"grouped": 0}
@@ -44,14 +44,13 @@ def visual_group_images(self, classify_results, job_ids: list):
         ordered_jobs = garment_jobs + spec_jobs
 
         print(f"[GROUP] Grouping {len(ordered_jobs)} images ({len(garment_jobs)} garments, {len(spec_jobs)} specs)")
-        
 
-        # Build message — all images as thumbnails in one call
+        # Build message content before committing status change
         content = []
         for job in ordered_jobs:
             content.append({
                 "type": "text",
-                "text": f"Image ID: {job.id} (type: {job.image_type})"
+                "text": f"Image ID: {job.id} | filename: {job.filename} | type: {job.image_type}"
             })
             content.append({
                 "type": "image_url",
@@ -62,26 +61,35 @@ def visual_group_images(self, classify_results, job_ids: list):
 
         content.append({
             "type": "text",
-            "text": f"""Group these garment images and spec labels into product groups for a catalog.
+            "text": f"""Group these garment images and spec labels into product groups for a fashion catalog.
 
-        Context: There are {spec_count} spec label images in this batch, which indicates approximately {spec_count} unique garment styles. Some garments may be missing a spec label.
+        There are {spec_count} spec label images, suggesting roughly {spec_count} unique garment styles — but create as many or as few groups as the images actually warrant. When in doubt, create MORE groups rather than fewer: two separate groups for the same garment can be manually merged, but two unrelated garments in the same group breaks the catalog.
 
-        Rules:
-        1. Group images that show the same physical garment together.
-        - Same garment = same fabric texture, color, and silhouette
-        - When in doubt, GROUP TOGETHER rather than split
-        - Only create separate groups if garments are clearly different products
+        === RULE 1 — FILENAME PROXIMITY IS THE PRIMARY SIGNAL (most important rule) ===
+        Images taken in the same shooting session are the same garment. Use these filename patterns:
+        - DSC-style: "DSC03601.JPG", "DSC03602.JPG" — sequential numbers within ~10 = same session = same garment.
+        - Timestamp-style: "20260406_095838.jpg", "20260406_095843.jpg" — within ~5 minutes = same session = same garment.
 
-        2. Within each group identify:
-        - best_front: clearest front-facing photo (collar/placket/buttons visible from front). Pick best if multiple.
-        - best_back: clearest back-facing photo (plain back panel, no front buttons). Pick best if multiple.
-        - details: all close-up images showing specific parts, fabric texture, or design elements. Keep ALL.
-        - spec: the spec label image — match to garment by fabric visible in background/edges of the label
-        - duplicates: near-identical images — keep only the best one, list the rest here
+        CRITICAL: Images from DIFFERENT sessions are DIFFERENT garments, even if they look visually similar (same color, same style).
+        - DSC03601 vs DSC03650 → DIFFERENT garments (gap of 49 = different session)
+        - Timestamps 10+ minutes apart → DIFFERENT garments
+        - Only merge cross-session images if you are 100% certain they are literally the same physical item (exact same fabric texture, stitching, and color match).
+        - When uncertain whether two sessions show the same garment: CREATE SEPARATE GROUPS.
 
-        3. If unsure whether an image is front or back, put it in details.
+        === RULE 2 — ASSIGNING ROLES ===
+        - best_front: The clearest full-garment shot with the front visible (collar, placket, buttons, or chest facing camera). Pick the sharpest one. Extra front shots of the same garment that are nearly identical go in duplicates; otherwise create a separate group.
+        - best_back: Any full-garment photo where the BACK is shown (back seam visible, no front buttons/placket). This includes photos where you cannot see the front opening. NEVER put a full-body back view in "details" — if it shows the whole garment from behind, it is best_back, always.
+        - details: Genuine close-up shots of a small part of the garment. Valid detail types include: collar close-up, pocket detail, fabric texture macro, label/logo close-up, AND close-up shots of any graphic, print, embroidery, or artwork on the garment. A graphic detail shot may look very different from the full garment (it may show only an illustration or print) — this is fine; use filename proximity to link it to the correct garment group. A photo showing the FULL garment from ANY angle is NEVER a detail — it is best_front, best_back, or belongs to a different group.
+        - spec: the printed spec label/hangtag. Match to garment group using filename proximity as the primary signal, then by any color swatch visible on the label.
+        - duplicates: ONLY for photos that are literally the same shot taken twice (burst mode, accidental re-shoot). The framing, angle, and lighting must be nearly identical. Rules: (a) two different garments are NEVER duplicates; (b) a back view is NEVER a duplicate of a front view; (c) if there is any doubt, do NOT duplicate — either assign to a role or create a new group.
 
-        Respond with only this JSON, no other text:
+        === RULE 3 — EVERY FULL-GARMENT PHOTO MUST GO SOMEWHERE ===
+        Every photo showing the full garment must be assigned to best_front, best_back, or its own group. Never silently discard a garment photo by marking it a duplicate unless it is genuinely a repeated identical shot.
+
+        === RULE 4 — SPEC MATCHING ===
+        Match each spec label to the garment group by filename proximity. If two spec labels appear near each other in filename order, check their color swatches — they likely belong to different garment groups.
+
+        Respond with ONLY this JSON (no markdown, no explanation):
         {{
         "groups": [
             {{
@@ -96,6 +104,12 @@ def visual_group_images(self, classify_results, job_ids: list):
         }}"""
         })
 
+        # Signal grouping has started — gives immediate UI feedback while the slow API call runs
+        for job in valid_jobs:
+            job.status = "GROUPING"
+            emit("job.status", {"job_id": job.id, "status": "GROUPING", "image_type": job.image_type})
+        db.commit()
+
         response = requests.post(
             OPENROUTER_URL,
             headers={
@@ -104,10 +118,10 @@ def visual_group_images(self, classify_results, job_ids: list):
             },
             json={
                 "model": "google/gemini-2.5-flash",
-                "max_tokens": 2000,
+                "max_tokens": 8000,
                 "messages": [{"role": "user", "content": content}]
             },
-            timeout=120.0
+            timeout=240.0
         )
 
         response.raise_for_status()
@@ -177,7 +191,7 @@ def visual_group_images(self, classify_results, job_ids: list):
         
         ungrouped = db.query(Job).filter(
             Job.id.in_(job_ids),
-            Job.status == "CLASSIFIED"
+            Job.status == "GROUPING"
         ).all()
         for job in ungrouped:
             job.status = "NEEDS_REVIEW"

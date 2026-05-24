@@ -40,11 +40,26 @@ services:
     env_file:
       - .env
 
-  # ── Celery worker ─────────────────────────────────────────────────────────────
-  # Scale horizontally with: docker compose up --scale worker=3
+  # ── Celery worker: I/O-bound tasks (classify, group, extract) ─────────────────
   worker:
     build: ./backend
-    command: celery -A celery_app worker --loglevel=info --pool=gevent --concurrency=20
+    command: celery -A celery_app worker --loglevel=info --pool=gevent --concurrency=20 --queues=celery
+    volumes:
+      - ./backend:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+
+  # ── Celery worker: CPU-bound image processing ─────────────────────────────────
+  # Uses prefork (multiprocessing) so Pillow's LANCZOS resize runs truly in
+  # parallel — gevent can't parallelize CPU-bound C code.
+  worker-process:
+    build: ./backend
+    command: celery -A celery_app worker --loglevel=info --pool=prefork --concurrency=4 --queues=processing
     volumes:
       - ./backend:/app
     depends_on:

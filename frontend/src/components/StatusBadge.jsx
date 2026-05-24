@@ -2,6 +2,7 @@ const CONFIG = {
   UPLOADED:       { label: 'Uploaded',        bg: '#1A1A1A',                   text: '#6B6052', border: '#252525', pulse: null },
   CLASSIFYING:    { label: 'Classifying',     bg: 'rgba(60,28,0,0.8)',         text: '#FDB347', border: '#5A3000', pulse: 'pulse-amber' },
   CLASSIFIED:     { label: 'Classified',      bg: 'rgba(45,20,0,0.6)',         text: '#D48E28', border: '#3D2200', pulse: null },
+  GROUPING:       { label: 'Grouping',         bg: 'rgba(0,52,50,0.85)',        text: '#3DD6CC', border: '#005A58', pulse: 'pulse-teal' },
   GROUPED:        { label: 'Grouped',         bg: 'rgba(0,40,42,0.7)',         text: '#3DD6CC', border: '#004A4E', pulse: null },
   PROCESSING:     { label: 'Processing',      bg: 'rgba(0,24,52,0.8)',         text: '#6BB8FF', border: '#003366', pulse: 'pulse-blue' },
   PROCESSED:      { label: 'Processed',       bg: 'rgba(0,18,40,0.6)',         text: '#4DA0EF', border: '#002650', pulse: null },

@@ -22,8 +22,8 @@ function defaultLayout(slide) {
     return {
       front:  { left: 5,   top: 17, width: 462, height: 662, rotation: 0 },
       back:   { left: 471, top: 17, width: 459, height: 662, rotation: 0 },
-      detail: { left: 934, top: 17, width: 395, height: 242, rotation: 0 },
-      specs:  { left: 928, top: 517, width: 400 },
+      detail: { left: 934, top: 17, width: 395, height: 400, rotation: 0 },
+      specs:  { left: 928, top: 430, width: 400 },
     }
   }
   if (hasFront && hasBack) {
@@ -73,8 +73,8 @@ function ResizeHandle({ pos, onMouseDown }) {
   )
 }
 
-// ── Draggable + resizable + rotatable element wrapper ─────────────────────────
-function EditableEl({ elKey, el, scale, canvasRef, zIndex, selected, onSelect, onLayoutChange, label, hasHeight, children }) {
+// ── Draggable + resizable element wrapper ─────────────────────────────────────
+function EditableEl({ elKey, el, scale, zIndex, selected, onSelect, onLayoutChange, label, hasHeight, children }) {
   if (!el) return null
   const rot = el.rotation || 0
 
@@ -140,34 +140,6 @@ function EditableEl({ elKey, el, scale, canvasRef, zIndex, selected, onSelect, o
     window.addEventListener('mouseup', onUp)
   }
 
-  function startRotate(e) {
-    e.stopPropagation()
-    e.preventDefault()
-    onSelect(elKey)
-
-    // Element center in viewport coords
-    const rect = canvasRef.current?.getBoundingClientRect()
-    if (!rect) return
-    const cx = rect.left + (el.left + el.width  / 2) * scale
-    const cy = rect.top  + (el.top  + (el.height || 0) / 2) * scale
-
-    const startAngle = Math.atan2(e.clientY - cy, e.clientX - cx) * 180 / Math.PI
-    const startRot = rot
-
-    function onMove(ev) {
-      const angle = Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180 / Math.PI
-      let newRot = startRot + (angle - startAngle)
-      newRot = ((newRot % 360) + 360) % 360
-      onLayoutChange(elKey, { ...el, rotation: Math.round(newRot) })
-    }
-    function onUp() {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }
-
   const isSel = selected === elKey
   const handles = hasHeight
     ? ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
@@ -202,32 +174,7 @@ function EditableEl({ elKey, el, scale, canvasRef, zIndex, selected, onSelect, o
           fontFamily: '"DM Mono", monospace', letterSpacing: '0.06em',
           pointerEvents: 'none', whiteSpace: 'nowrap', zIndex: 50,
         }}>
-          {label}{rot ? `  ${rot}°` : ''}
-        </div>
-      )}
-
-      {/* Rotation handle — circle above top-center, same as PPT/Word */}
-      {isSel && hasHeight && (
-        <div
-          onMouseDown={startRotate}
-          style={{
-            position: 'absolute',
-            top: -36, left: '50%', transform: 'translateX(-50%)',
-            display: 'flex', flexDirection: 'column', alignItems: 'center',
-            cursor: 'grab', zIndex: 51, pointerEvents: 'all',
-          }}
-        >
-          <div style={{ width: 1, height: 18, background: 'rgba(196,150,106,0.7)' }} />
-          <div style={{
-            width: 16, height: 16, borderRadius: '50%',
-            background: 'rgba(196,150,106,0.95)',
-            border: '2px solid #fff',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 10, color: '#111', lineHeight: 1,
-            userSelect: 'none',
-          }}>
-            ↻
-          </div>
+          {label}
         </div>
       )}
 
@@ -262,13 +209,13 @@ function SlideCanvas({ slide, compact, layout, onLayoutChange, selected, onSelec
   const detail = imgUrl(slide.detail_image_path)
 
   const specs = [
-    slide.ref_number && `REF NO   : ${slide.ref_number}`,
-    slide.afs        && `AFS          : ${slide.afs}`,
-    slide.fabric     && `COMP     : ${slide.fabric}`,
-    slide.gsm        && `GSM        : ${slide.gsm}`,
+    slide.ref_number && `REF NO  : ${slide.ref_number}`,
+    slide.afs        && `AFS     : ${slide.afs}`,
+    slide.fabric     && `COMP    : ${slide.fabric}`,
+    slide.gsm        && `GSM     : ${slide.gsm}`,
   ].filter(Boolean).join('\n')
 
-  // Positioned box with objectFit:contain image inside — used for compact thumbnails
+  // Positioned box with image inside — used for compact thumbnails
   const ImgBox = ({ src, box, zIdx }) => {
     const rot = box.rotation || 0
     return (
@@ -280,7 +227,7 @@ function SlideCanvas({ slide, compact, layout, onLayoutChange, selected, onSelec
         transformOrigin: 'center center',
       }}>
         <img src={src} alt="" loading="lazy" draggable={false}
-          style={{ display: 'block', width: '100%', height: '100%', objectFit: 'contain' }}
+          style={{ display: 'block', width: '100%', height: '100%', objectFit: box.fit || 'contain' }}
         />
       </div>
     )
@@ -306,9 +253,9 @@ function SlideCanvas({ slide, compact, layout, onLayoutChange, selected, onSelec
               <div style={{
                 position: 'absolute',
                 left: layout.specs.left, top: layout.specs.top, width: layout.specs.width,
-                fontSize: 10, fontFamily: 'Calibri, sans-serif',
-                color: '#1a1a1a', lineHeight: 1.8, whiteSpace: 'pre', zIndex: 5,
-                background: 'rgba(255,255,255,0.9)', padding: '3px 5px',
+                fontSize: 14, fontFamily: 'Calibri, sans-serif',
+                color: '#1a1a1a', lineHeight: 2, whiteSpace: 'pre', zIndex: 5,
+                background: 'rgba(255,255,255,0.9)', padding: '4px 6px',
               }}>
                 {specs}
               </div>
@@ -321,10 +268,15 @@ function SlideCanvas({ slide, compact, layout, onLayoutChange, selected, onSelec
 
   // ── Interactive edit mode ────────────────────────────────────────────────────
   const elProps = (key, zi, hH) => ({
-    elKey: key, el: layout[key], scale, canvasRef: innerRef,
+    elKey: key, el: layout[key], scale,
     zIndex: zi, hasHeight: hH,
     selected, onSelect,
     onLayoutChange,
+  })
+
+  const imgStyle = (key) => ({
+    display: 'block', width: '100%', height: '100%',
+    objectFit: layout[key]?.fit || 'contain',
   })
 
   return (
@@ -346,28 +298,28 @@ function SlideCanvas({ slide, compact, layout, onLayoutChange, selected, onSelec
         >
           {front  && layout.front  && (
             <EditableEl {...elProps('front',  1, true)} label="FRONT">
-              <img src={front}  alt="" draggable={false} style={imgFill} />
+              <img src={front}  alt="" draggable={false} style={imgStyle('front')} />
             </EditableEl>
           )}
           {back   && layout.back   && (
             <EditableEl {...elProps('back',   2, true)} label="BACK">
-              <img src={back}   alt="" draggable={false} style={imgFill} />
+              <img src={back}   alt="" draggable={false} style={imgStyle('back')} />
             </EditableEl>
           )}
           {detail && layout.detail && (
             <EditableEl {...elProps('detail', 3, true)} label="DETAIL">
-              <img src={detail} alt="" draggable={false} style={imgFill} />
+              <img src={detail} alt="" draggable={false} style={imgStyle('detail')} />
             </EditableEl>
           )}
           {specs && layout.specs && (
             <EditableEl {...elProps('specs', 4, false)} label="SPECS">
               <div style={{
                 width: '100%',
-                fontSize: 11, fontFamily: 'Calibri, "Segoe UI", sans-serif',
-                color: '#1a1a1a', lineHeight: 1.85,
+                fontSize: 17, fontFamily: 'Calibri, "Segoe UI", sans-serif',
+                color: '#1a1a1a', lineHeight: 2.1,
                 whiteSpace: 'pre', letterSpacing: 0.3,
                 background: 'rgba(255,255,255,0.9)',
-                padding: '6px 8px', borderRadius: 1,
+                padding: '8px 10px', borderRadius: 1,
               }}>
                 {specs}
               </div>
@@ -571,6 +523,11 @@ export function CatalogView({ slides, onSave }) {
     setExporting(null)
   }
 
+  const selLayout = (selected && selectedEl) ? (getLayout(selected)[selectedEl] ?? null) : null
+  const selIsImg  = selLayout?.height !== undefined
+  const selFit    = selLayout?.fit || 'contain'
+  const selRot    = selLayout?.rotation || 0
+
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
 
@@ -636,10 +593,25 @@ export function CatalogView({ slides, onSave }) {
           {selected && (
             <>
               <div style={{ flex: 1 }} />
-              <span style={{ fontSize: 9, fontFamily: '"DM Mono", monospace', color: 'var(--text-faint)', letterSpacing: '0.05em' }}>
-                drag · resize · ↻ rotate
-              </span>
-              <Btn label="Reset Layout" onClick={resetLayout} muted />
+              {selLayout ? (
+                <>
+                  <span style={{ fontSize: 9, fontFamily: '"DM Mono", monospace', color: 'var(--gold)', letterSpacing: '0.08em', textTransform: 'uppercase', marginRight: 2 }}>
+                    {selectedEl}{selRot ? ` · ${selRot}°` : ''}
+                  </span>
+                  {selIsImg && (
+                    <>
+                      <Btn label="↺ -90°" onClick={() => handleLayoutChange(selectedEl, { ...selLayout, rotation: (((selRot - 90) % 360) + 360) % 360 })} />
+                      <Btn label="↻ +90°" onClick={() => handleLayoutChange(selectedEl, { ...selLayout, rotation: (selRot + 90) % 360 })} />
+                      <Btn label={selFit === 'contain' ? 'Fill' : 'Fit'} onClick={() => handleLayoutChange(selectedEl, { ...selLayout, fit: selFit === 'contain' ? 'cover' : 'contain' })} />
+                    </>
+                  )}
+                </>
+              ) : (
+                <span style={{ fontSize: 9, fontFamily: '"DM Mono", monospace', color: 'var(--text-faint)', letterSpacing: '0.05em' }}>
+                  click an element to select
+                </span>
+              )}
+              <Btn label="Reset" onClick={resetLayout} muted />
             </>
           )}
         </div>

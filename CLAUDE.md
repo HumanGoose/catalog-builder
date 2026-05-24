@@ -209,7 +209,7 @@ Both `useJobs` and `useGroups` start empty and never auto-load DB history:
 
 ```bash
 # Start all services
-docker compose up redis postgres api worker flower
+docker compose up redis postgres api worker worker-process flower
 
 # View worker logs
 docker compose logs -f worker
@@ -268,6 +268,15 @@ Key variables: `OPENROUTER_API_KEY`, `REDIS_URL`, `DATABASE_URL`, `CELERY_BROKER
 - `handleEvent` for `job.status` silently ignores events for job IDs not already in local state — prevents ghost cards from stale Celery tasks left over from a previous worker session.
 - `job.reassigned` payload: `to_group` is `null` when a job is moved to the tray (not `undefined`). The handler checks `!== undefined` rather than truthiness so null is applied correctly.
 - `patchJob(id, fields)` — optimistic single-job update; bypasses STATUS_RANK, use for immediate UI feedback on drag before WS round-trip.
+
+### visual_group_images retry gotcha
+- Jobs are set to `GROUPING` *before* the OpenRouter API call. If the call fails (e.g. BrokenPipeError), the Celery retry will find zero `CLASSIFIED` jobs and silently return `{'grouped': 0}`, leaving jobs stuck in `GROUPING` forever.
+- Fix: `valid_jobs` filter must accept both `"CLASSIFIED"` and `"GROUPING"` — already applied in `group.py`.
+- Timeout is 240s — large batches with many base64 thumbnails can take that long on Gemini 2.5 Flash.
+
+### Grouping prompt — detail role
+- Close-ups of graphics, prints, and embroidery on a garment are valid `details`. The prompt explicitly tells the model a graphic detail shot "may look very different from the full garment" and to use filename proximity to link it.
+- Prompt lives in `pipeline/tasks/group.py` — search for `=== RULE 2`.
 
 ### Slide ↔ Job matching
 - `slide.style_number` = canonical group slug — always matches `job.style_group`; use this for joins

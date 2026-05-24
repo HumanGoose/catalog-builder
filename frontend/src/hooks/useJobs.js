@@ -7,10 +7,10 @@ const TERMINAL = new Set(['ASSIGNED', 'DUPLICATE', 'NEEDS_REVIEW', 'FAILED'])
 // Pipeline statuses in rough advancement order — used to avoid
 // downgrading a job that WS already advanced past "UPLOADED".
 const STATUS_RANK = {
-  UPLOADED: 0, CLASSIFYING: 1, CLASSIFIED: 2,
-  GROUPED: 3, PROCESSING: 4, EXTRACTING: 4,
-  PROCESSED: 5, SPEC_EXTRACTED: 5,
-  ASSIGNED: 6, DUPLICATE: 6, NEEDS_REVIEW: 6, FAILED: 6,
+  UPLOADED: 0, CLASSIFYING: 1, CLASSIFIED: 2, GROUPING: 3,
+  GROUPED: 4, PROCESSING: 5, EXTRACTING: 5,
+  PROCESSED: 6, SPEC_EXTRACTED: 6,
+  ASSIGNED: 7, DUPLICATE: 7, NEEDS_REVIEW: 7, FAILED: 7,
 }
 
 export function useJobs() {

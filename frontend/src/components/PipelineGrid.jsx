@@ -1,12 +1,133 @@
-import { useMemo } from 'react'
+import React, { useMemo } from 'react'
 import { JobCard } from './JobCard.jsx'
 import { StatusBadge } from './StatusBadge.jsx'
 
 const STATUS_ORDER = [
-  'CLASSIFYING','EXTRACTING','PROCESSING',
+  'CLASSIFYING','GROUPING','EXTRACTING','PROCESSING',
   'CLASSIFIED','SPEC_EXTRACTED','PROCESSED','GROUPED',
   'ASSIGNED','UPLOADED','NEEDS_REVIEW','DUPLICATE','FAILED',
 ]
+
+// ── Pipeline flow visualization ───────────────────────────────────────────────
+const FLOW_STAGES = [
+  {
+    id: 'classify', label: 'Classify',
+    buckets: ['UPLOADED', 'CLASSIFYING', 'CLASSIFIED'],
+    active: ['CLASSIFYING'],
+    color: '#FDB347', pulse: 'pulse-amber',
+  },
+  {
+    id: 'group', label: 'Group',
+    buckets: ['GROUPING'],
+    active: ['GROUPING'],
+    color: '#3DD6CC', pulse: 'pulse-teal',
+  },
+  {
+    id: 'process', label: 'Process',
+    buckets: ['GROUPED', 'PROCESSING', 'EXTRACTING', 'PROCESSED', 'SPEC_EXTRACTED'],
+    active: ['PROCESSING', 'EXTRACTING'],
+    color: '#6BB8FF', pulse: 'pulse-blue',
+  },
+  {
+    id: 'done', label: 'Assigned',
+    buckets: ['ASSIGNED'],
+    active: [],
+    color: '#C4966A', pulse: null,
+  },
+]
+
+const EXCEPTION_STAGES = [
+  { id: 'review',    label: 'Review',    statuses: ['NEEDS_REVIEW'], color: '#FF8C42' },
+  { id: 'duplicate', label: 'Dup',       statuses: ['DUPLICATE'],    color: '#5A4A40' },
+  { id: 'failed',    label: 'Failed',    statuses: ['FAILED'],       color: '#FF6B6B' },
+]
+
+function PipelineFlow({ jobs }) {
+  const jobList = Object.values(jobs)
+  if (jobList.length === 0) return null
+
+  const cnt = (statuses) => jobList.filter(j => statuses.includes(j.status)).length
+
+  const stages = FLOW_STAGES.map(s => ({
+    ...s,
+    count: cnt(s.buckets),
+    isActive: cnt(s.active) > 0,
+  }))
+
+  const exceptions = EXCEPTION_STAGES
+    .map(e => ({ ...e, count: cnt(e.statuses) }))
+    .filter(e => e.count > 0)
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center',
+      padding: '8px 20px',
+      borderBottom: '1px solid var(--border)',
+      background: 'var(--bg)',
+      flexShrink: 0,
+      minHeight: 52,
+    }}>
+      {stages.map((stage, i) => (
+        <React.Fragment key={stage.id}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, minWidth: 68 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{
+                fontSize: 9, fontFamily: '"DM Mono", monospace',
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                color: stage.isActive ? stage.color : stage.count > 0 ? 'var(--text-muted)' : 'var(--text-faint)',
+              }}>
+                {stage.label}
+              </span>
+              {stage.isActive && stage.pulse && (
+                <span
+                  className={stage.pulse}
+                  style={{
+                    width: 5, height: 5, borderRadius: '50%',
+                    background: stage.color, display: 'inline-block', flexShrink: 0,
+                  }}
+                />
+              )}
+            </div>
+            <span style={{
+              fontSize: 17, fontFamily: '"DM Mono", monospace',
+              fontWeight: stage.isActive ? 600 : 400,
+              color: stage.isActive ? stage.color : stage.count > 0 ? stage.color : 'var(--text-faint)',
+              opacity: stage.count === 0 ? 0.25 : 1,
+              lineHeight: 1,
+            }}>
+              {stage.count}
+            </span>
+          </div>
+          {i < stages.length - 1 && (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 16 }}>
+              <svg width="14" height="10" viewBox="0 0 14 10" fill="none">
+                <path d="M0 5h11M8 2l3 3-3 3" stroke="var(--border-soft)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+          )}
+        </React.Fragment>
+      ))}
+
+      {exceptions.length > 0 && (
+        <>
+          <div style={{ width: 1, height: 28, background: 'var(--border)', margin: '0 14px', flexShrink: 0 }} />
+          <div style={{ display: 'flex', gap: 14, flexShrink: 0 }}>
+            {exceptions.map(e => (
+              <div key={e.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                <span style={{ fontSize: 9, fontFamily: '"DM Mono", monospace', letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>
+                  {e.label}
+                </span>
+                <span style={{ fontSize: 15, fontFamily: '"DM Mono", monospace', color: e.color, fontWeight: 500, lineHeight: 1 }}>
+                  {e.count}
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
 
 function EmptyState() {
   return (
@@ -66,6 +187,7 @@ export function PipelineGrid({ jobs, filter, onFilterChange }) {
   const jobList = Object.values(jobs)
 
   const sorted = useMemo(() => {
+
     return [...jobList].sort((a, b) => {
       const oa = STATUS_ORDER.indexOf(a.status)
       const ob = STATUS_ORDER.indexOf(b.status)
@@ -90,6 +212,9 @@ export function PipelineGrid({ jobs, filter, onFilterChange }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Pipeline flow bar */}
+      <PipelineFlow jobs={jobs} />
+
       {/* Filter bar */}
       {jobList.length > 0 && (
         <div
