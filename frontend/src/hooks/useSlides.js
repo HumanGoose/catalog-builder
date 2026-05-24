@@ -24,14 +24,23 @@ export function useSlides() {
     } catch {}
   }, [_upsert])
 
-  // Call on WS event — only care about group.complete to add/refresh a slide
   const handleEvent = useCallback((event) => {
     if (event.event === 'group.complete' && event.slide_id) {
-      // Re-fetch just that slide
       fetch(`${API}/slides/${event.slide_id}`)
         .then(r => r.ok ? r.json() : null)
         .then(slide => { if (slide) _upsert(slide) })
         .catch(() => {})
+    } else if (event.event === 'group.deleted') {
+      setSlides(prev => {
+        const next = { ...prev }
+        Object.keys(next).forEach(id => {
+          if (next[id].group_id === event.group_id) {
+            knownIds.current.delete(id)
+            delete next[id]
+          }
+        })
+        return next
+      })
     }
   }, [_upsert])
 

@@ -1,8 +1,6 @@
 services:
 
   # ── Message broker ───────────────────────────────────────────────────────────
-  # Redis acts as the "post office" between the API and Celery workers.
-  # The API puts tasks in Redis; workers pull them out and execute them.
   redis:
     image: redis:7-alpine
     healthcheck:
@@ -11,9 +9,22 @@ services:
       timeout: 3s
       retries: 5
 
+  # ── Database ──────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: catalog
+      POSTGRES_USER: catalog
+      POSTGRES_PASSWORD: catalog
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U catalog -d catalog"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   # ── FastAPI backend ───────────────────────────────────────────────────────────
-  # Handles HTTP requests: image uploads, status queries, slide edits, PPT export.
-  # Also manages the WebSocket connection for real-time frontend updates.
   api:
     build: ./backend
     command: uvicorn main:app --reload --host 0.0.0.0 --port 8000
@@ -24,28 +35,27 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     env_file:
       - .env
 
   # ── Celery worker ─────────────────────────────────────────────────────────────
-  # Runs the actual pipeline tasks: classify → extract → process → assign.
-  # Same codebase as the API, different entrypoint command.
   # Scale horizontally with: docker compose up --scale worker=3
   worker:
     build: ./backend
-    command: celery -A celery_app worker --loglevel=info --concurrency=8
+    command: celery -A celery_app worker --loglevel=info --pool=gevent --concurrency=20
     volumes:
       - ./backend:/app
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     env_file:
       - .env
 
   # ── Flower (Celery monitoring UI) ─────────────────────────────────────────────
-  # Visual dashboard at localhost:5555 — shows task queues, worker status,
-  # task history, and retry counts. This is the "observable pipeline" the
-  # job spec explicitly calls out.
   flower:
     build: ./backend
     command: celery -A celery_app flower --port=5555
@@ -73,3 +83,6 @@ services:
     environment:
       - VITE_API_URL=http://localhost:8000
       - VITE_WS_URL=ws://localhost:8000/ws
+
+volumes:
+  postgres_data:

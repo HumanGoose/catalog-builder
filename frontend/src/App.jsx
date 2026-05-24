@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { DndContext, DragOverlay, pointerWithin, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { Header } from './components/Header.jsx'
 import { UploadPanel } from './components/UploadPanel.jsx'
@@ -18,12 +18,30 @@ import { useSlides } from './hooks/useSlides.js'
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 export default function App() {
-  const [view, setView] = useState('canvas')
   const [filter, setFilter] = useState('ALL')
   const [activeJob, setActiveJob] = useState(null)
   const [selectedJob, setSelectedJob] = useState(null)
   const [selectedGroup, setSelectedGroup] = useState(null)
   const [catalogOpen, setCatalogOpen] = useState(false)
+  const [hasUploaded, setHasUploaded] = useState(false)
+  const [pipelineHeight, setPipelineHeight] = useState(220)
+  const isDraggingDivider = useRef(false)
+  const dividerDragStart = useRef({ y: 0, height: 0 })
+
+  useEffect(() => {
+    function onMouseMove(e) {
+      if (!isDraggingDivider.current) return
+      const delta = dividerDragStart.current.y - e.clientY
+      setPipelineHeight(h => Math.max(60, Math.min(600, dividerDragStart.current.height + delta)))
+    }
+    function onMouseUp() { isDraggingDivider.current = false }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+  }, [])
 
   const { jobs, handleEvent: handleJobEvent, addJobs, fetchAll: fetchJobs, patchJob } = useJobs()
   const { groups, handleEvent: handleGroupEvent, fetchAll: fetchGroups, moveJob, createGroup, renameGroup, deleteGroup } = useGroups()
@@ -115,6 +133,11 @@ export default function App() {
     setActiveJob(null)
   }
 
+  function handleUploaded(uploadedJobs) {
+    addJobs(uploadedJobs)
+    setHasUploaded(true)
+  }
+
   return (
     <DndContext
       sensors={sensors}
@@ -129,67 +152,78 @@ export default function App() {
       }}>
         <Header connected={connected} jobCount={jobCount} />
 
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          {/* Left sidebar: Upload */}
-          <aside style={{
-            width: 272, flexShrink: 0,
-            borderRight: '1px solid var(--border)', overflowY: 'auto',
+        {!hasUploaded ? (
+          /* ── Upload landing ── */
+          <div style={{
+            flex: 1, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', gap: 24,
           }}>
-            <UploadPanel jobs={jobs} onUploaded={addJobs} />
-          </aside>
-
-          {/* Center: Canvas or Pipeline */}
-          <main style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <div style={{
-              display: 'flex', borderBottom: '1px solid var(--border)',
-              padding: '0 16px', flexShrink: 0,
-            }}>
-              {['canvas', 'pipeline'].map(v => (
-                <button
-                  key={v}
-                  onClick={() => setView(v)}
-                  style={{
-                    padding: '8px 14px', background: 'none', border: 'none',
-                    cursor: 'pointer', fontSize: 12, fontWeight: 600,
-                    textTransform: 'capitalize', letterSpacing: 0.3,
-                    color: view === v ? '#e5e7eb' : '#555',
-                    borderBottom: view === v ? '2px solid #7c3aed' : '2px solid transparent',
-                    marginBottom: -1,
-                  }}
-                >
-                  {v}
-                </button>
-              ))}
+            <div style={{ textAlign: 'center', marginBottom: 8 }}>
+              <p style={{
+                margin: 0, fontSize: 11, fontFamily: '"DM Mono", monospace',
+                letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text-muted)',
+              }}>
+                Upload garment photos to begin
+              </p>
             </div>
+            <div style={{ width: 420 }}>
+              <UploadPanel onUploaded={handleUploaded} />
+            </div>
+          </div>
+        ) : (
+          /* ── Main workspace ── */
+          <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+            {/* Center: Canvas (top) + Pipeline (bottom), resizable */}
+            <main style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              {/* Canvas row */}
+              <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
+                <Canvas
+                  groups={groups}
+                  liveJobs={jobs}
+                  onImageClick={setSelectedJob}
+                  onGroupClick={setSelectedGroup}
+                  onCreateGroup={createGroup}
+                  slideCount={slideCount}
+                  onOpenCatalog={() => setCatalogOpen(true)}
+                />
+                <Tray trayJobs={trayJobs} onImageClick={setSelectedJob} />
+              </div>
 
-            <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
-              {view === 'canvas' ? (
-                <>
-                  <Canvas
-                    groups={groups}
-                    liveJobs={jobs}
-                    onImageClick={setSelectedJob}
-                    onGroupClick={setSelectedGroup}
-                    onCreateGroup={createGroup}
-                    slideCount={slideCount}
-                    onOpenCatalog={() => setCatalogOpen(true)}
-                  />
-                  <Tray trayJobs={trayJobs} onImageClick={setSelectedJob} />
-                </>
-              ) : (
+              {/* Draggable divider */}
+              <div
+                onMouseDown={e => {
+                  e.preventDefault()
+                  isDraggingDivider.current = true
+                  dividerDragStart.current = { y: e.clientY, height: pipelineHeight }
+                }}
+                style={{
+                  height: 6, flexShrink: 0, cursor: 'row-resize',
+                  background: 'var(--border)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <div style={{
+                  width: 32, height: 2, borderRadius: 1,
+                  background: '#3a3a3a',
+                  pointerEvents: 'none',
+                }} />
+              </div>
+
+              {/* Pipeline panel */}
+              <div style={{ height: pipelineHeight, flexShrink: 0, overflow: 'hidden' }}>
                 <PipelineGrid jobs={jobs} filter={filter} onFilterChange={setFilter} />
-              )}
-            </div>
-          </main>
+              </div>
+            </main>
 
-          {/* Right sidebar: Slide review */}
-          <aside style={{
-            width: 288, flexShrink: 0,
-            borderLeft: '1px solid var(--border)', overflowY: 'auto',
-          }}>
-            <SlideReview jobs={jobs} />
-          </aside>
-        </div>
+            {/* Right sidebar: Slide review */}
+            <aside style={{
+              width: 288, flexShrink: 0,
+              borderLeft: '1px solid var(--border)', overflowY: 'auto',
+            }}>
+              <SlideReview jobs={jobs} />
+            </aside>
+          </div>
+        )}
       </div>
 
       {/* Drag overlay */}

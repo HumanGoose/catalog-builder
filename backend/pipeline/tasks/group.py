@@ -2,7 +2,7 @@ import os
 import base64
 import json
 import io
-import httpx
+import requests
 from PIL import Image
 from celery_app import celery_app
 from models.database import SessionLocal
@@ -96,7 +96,7 @@ def visual_group_images(self, classify_results, job_ids: list):
         }}"""
         })
 
-        response = httpx.post(
+        response = requests.post(
             OPENROUTER_URL,
             headers={
                 "Authorization": f"Bearer {OPENROUTER_API_KEY}",

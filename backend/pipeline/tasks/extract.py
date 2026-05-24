@@ -1,7 +1,7 @@
 import os
 import base64
 import json
-import httpx
+import requests
 from celery_app import celery_app
 from models.database import SessionLocal
 from models.job import Job
@@ -52,7 +52,7 @@ Respond with only this JSON:
   "afs": "..."
 }"""
 
-        response = httpx.post(
+        response = requests.post(
             OPENROUTER_URL,
             headers={
                 "Authorization": f"Bearer {OPENROUTER_API_KEY}",

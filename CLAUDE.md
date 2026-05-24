@@ -6,14 +6,15 @@ A full-stack automated garment catalog builder built as a job application projec
 
 - **Backend:** Python 3.11 + FastAPI
 - **Queue:** Celery + Redis (message broker)
-- **Database:** SQLite via SQLAlchemy
+- **Database:** PostgreSQL 16 via SQLAlchemy (psycopg2-binary); `postgres_data` named volume persists across restarts
 - **Image processing:** Pillow (EXIF correction, brightness/contrast enhancement, resize by type)
 - **AI:** OpenRouter API — two models:
   - `google/gemini-2.0-flash-lite-001` for per-image classification
   - `google/gemini-2.5-flash` for visual batch grouping and spec extraction
 - **PPT generation:** python-pptx (planned)
 - **Frontend:** React 18 + Tailwind CSS + `@dnd-kit/core` (interactive canvas view)
-- **Infra:** Docker Compose (5 services: redis, api, worker, flower, frontend)
+- **Infra:** Docker Compose (6 services: redis, postgres, api, worker, flower, frontend)
+- **Worker pool:** gevent (`--pool=gevent --concurrency=20`) — I/O-bound tasks (API calls) run as greenlets, not processes
 
 ## Pipeline — Current Architecture
 
@@ -43,7 +44,7 @@ After grouping, each job gets one of:
 
 | Task | File | What it does |
 |------|------|-------------|
-| `classify_image` | `pipeline/tasks/classify.py` | Calls Gemini Flash Lite to classify each image as `garment` or `spec`, sets `image_type` and `confidence` |
+| `classify_image` | `pipeline/tasks/classify.py` | Resizes image to 300px thumbnail before sending (same as group.py) — sending full 3–6MB images causes 17–27s API calls; thumbnails bring it to ~1–2s. Sets `image_type` and `confidence` |
 | `visual_group_images` | `pipeline/tasks/group.py` | Sends all thumbnails (300px) in one multi-image call to Gemini 2.5 Flash; returns groups with `best_front`, `best_back`, `details`, `spec`, `duplicates`; writes `style_group` and refined `image_type` back to each Job; then fires one chord per group (process_image / extract_specs → assign_to_slide) |
 | `extract_specs` | `pipeline/tasks/extract.py` | For spec-type images, calls Gemini 2.5 Flash to parse the label and extract `reference_no`, `fabric`, `gsm`, `date`, `afs` into `Job.spec_data` |
 | `process_image` | `pipeline/tasks/process.py` | For front/back/detail images, applies EXIF correction, brightness/contrast enhancement, and resizes (front/back→1200px, detail→600px); writes result to `storage/processed/` |
@@ -84,7 +85,8 @@ GET    /jobs/{id}       — single job status
 PATCH  /jobs/{id}       — update style_group and/or image_type; emits job.reassigned WS event;
                           auto-promotes NEEDS_REVIEW → ASSIGNED when style_group is set;
                           setting style_group=null resets job to NEEDS_REVIEW;
-                          changing image_type away from "duplicate" promotes DUPLICATE → ASSIGNED/NEEDS_REVIEW
+                          changing image_type away from "duplicate" promotes DUPLICATE → ASSIGNED/NEEDS_REVIEW;
+                          calls _sync_slide() for affected groups and emits group.complete with slide_id
 GET    /groups          — list GarmentGroups with their member jobs
 GET    /groups/{id}     — single group with member jobs
 POST   /groups          — create a new empty group; emits group.created WS event
@@ -96,12 +98,14 @@ WS     /ws              — WebSocket for real-time pipeline events (push-only; 
 
 Static file mounts: `/uploads/*` and `/processed/*`
 
-### Planned (not yet built)
+### Also implemented (in `api/routes/export.py`)
 
 ```
 GET    /slides          — list slides
-PATCH  /slides/{id}     — edit slide fields before export
-GET    /export/pptx     — trigger PPT generation, return file
+GET    /slides/{id}     — single slide
+PATCH  /slides/{id}     — edit slide fields; sets is_edited=True to prevent pipeline overwrites
+POST   /export/pptx     — session-scoped export: accepts {slide_ids, layouts}
+POST   /export/pdf      — same as pptx but converts via LibreOffice (requires libreoffice-impress in container)
 ```
 
 ## Folder Structure
@@ -170,7 +174,7 @@ Workers can't touch FastAPI's WebSocket list (separate process). Bridge: workers
 | Event | Emitted by | Payload highlights |
 |---|---|---|
 | `job.status` | every pipeline task | `job_id`, `status`, `image_type`, `style_group` |
-| `group.complete` | `assign_to_slide` | `group_id`, `group` (style_name), `has_front/back/detail/spec` |
+| `group.complete` | `assign_to_slide` + `PATCH /jobs/{id}` | `group_id`, `slide_id`, `group` (style_name), `has_front/back/detail/spec` |
 | `job.reassigned` | `PATCH /jobs/{id}` | `job_id`, `from_group`, `to_group` (null = moved to tray), `image_type`, `status`, `original_path`, `processed_path` |
 | `group.created` | `POST /groups` | `group_id`, `style_name`, `style_number` |
 | `group.updated` | `PATCH /groups/{id}` | `group_id`, `style_name`, `style_number`, `old_name` |
@@ -199,11 +203,13 @@ Both `useJobs` and `useGroups` start empty and never auto-load DB history:
 
 `useJobs` handles `group.deleted` — resets all in-memory jobs whose `style_group` matches the deleted group's `style_name` to `NEEDS_REVIEW`.
 
+`useSlides` handles `group.complete` (adds/refreshes a slide by fetching `slide_id`) and `group.deleted` (removes the matching slide by `group_id`). Slides are keyed by `id`; matched to groups via `slide.group_id`.
+
 ## Dev Commands
 
 ```bash
-# Start backend services
-docker compose up redis api worker flower
+# Start all services
+docker compose up redis postgres api worker flower
 
 # View worker logs
 docker compose logs -f worker
@@ -225,6 +231,14 @@ Copy `.env.example` to `.env` and fill in values. Never commit `.env`.
 Key variables: `OPENROUTER_API_KEY`, `REDIS_URL`, `DATABASE_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`
 
 ## Dev Quirks & Gotchas
+
+### httpx vs requests in Celery tasks
+- **Never use `httpx` in Celery tasks when running `--pool=gevent`** — httpx runs its own asyncio event loop internally which gevent cannot monkey-patch, making all API calls effectively serial despite high concurrency
+- Use `requests` instead — it uses `urllib3` → stdlib `socket` which gevent patches for cooperative I/O
+
+### Rebuilding a service after requirements.txt changes
+- `docker compose build <svc>` rebuilds the image but `docker compose up -d <svc>` may reuse the old container
+- Always follow with `docker compose up -d --force-recreate <svc>` to guarantee the new image is used
 
 ### WebSocket / Redis subscriber
 - `asyncio.create_task(redis_subscriber())` tasks are killed by uvicorn `--reload` on every file save. The subscriber must have a `while True` retry loop and re-raise `asyncio.CancelledError` to be resilient.

@@ -2,36 +2,13 @@ import { useState, useRef, useCallback } from 'react'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-const ACTIVE  = new Set(['CLASSIFYING','CLASSIFIED','GROUPED','PROCESSING','PROCESSED','EXTRACTING','SPEC_EXTRACTED'])
-const DONE    = new Set(['ASSIGNED'])
-const PROBLEM = new Set(['NEEDS_REVIEW','DUPLICATE','FAILED'])
-
-function StatPill({ label, value, color }) {
-  return (
-    <div style={{ textAlign: 'center' }}>
-      <div style={{ fontSize: '20px', fontWeight: 600, fontFamily: '"DM Mono", monospace', color }}>
-        {value}
-      </div>
-      <div style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-        {label}
-      </div>
-    </div>
-  )
-}
-
-export function UploadPanel({ jobs, onUploaded }) {
+export function UploadPanel({ onUploaded }) {
   const [dragging, setDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [lastCount, setLastCount] = useState(null)
   const [error, setError] = useState(null)
   const inputRef = useRef(null)
   const dragCounter = useRef(0)
-
-  const jobList = Object.values(jobs)
-  const total   = jobList.length
-  const active  = jobList.filter(j => ACTIVE.has(j.status)).length
-  const done    = jobList.filter(j => DONE.has(j.status)).length
-  const flagged = jobList.filter(j => PROBLEM.has(j.status)).length
 
   const upload = useCallback(async (files) => {
     if (!files?.length) return
@@ -67,19 +44,7 @@ export function UploadPanel({ jobs, onUploaded }) {
   const onInputChange = (e) => { upload(e.target.files); e.target.value = '' }
 
   return (
-    <div style={{ padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-
-      {/* Title */}
-      <div>
-        <h2
-          style={{
-            margin: 0, fontSize: '11px', fontFamily: '"DM Mono", monospace',
-            letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text-muted)',
-          }}
-        >
-          Upload
-        </h2>
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
       {/* Drop zone */}
       <div
@@ -158,24 +123,6 @@ export function UploadPanel({ jobs, onUploaded }) {
         </div>
       )}
 
-      {/* Divider */}
-      <div style={{ height: '1px', background: 'var(--border)' }} />
-
-      {/* Stats */}
-      <div>
-        <p style={{
-          margin: '0 0 16px', fontSize: '11px', fontFamily: '"DM Mono", monospace',
-          letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text-muted)',
-        }}>
-          Pipeline
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 8px' }}>
-          <StatPill label="Total"   value={total}   color="var(--text)" />
-          <StatPill label="Active"  value={active}  color="#6BB8FF" />
-          <StatPill label="Catalog" value={done}    color="var(--gold)" />
-          <StatPill label="Flagged" value={flagged} color="#FF8C42" />
-        </div>
-      </div>
     </div>
   )
 }
