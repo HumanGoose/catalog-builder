@@ -161,21 +161,6 @@ export function SlideReview({ jobs }) {
           ))
         )}
 
-        {groupNames.length > 0 && (
-          <button
-            style={{
-              width: '100%', padding: '10px', marginTop: '8px',
-              borderRadius: '3px', border: '1px solid var(--border)',
-              background: 'transparent', cursor: 'not-allowed', opacity: 0.4,
-              fontSize: '11px', fontFamily: '"DM Mono", monospace',
-              color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase',
-            }}
-            disabled
-            title="Coming soon"
-          >
-            Export .pptx
-          </button>
-        )}
       </div>
     </div>
   )

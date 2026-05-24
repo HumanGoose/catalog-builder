@@ -16,14 +16,20 @@ from pipeline.events import emit
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+# Smaller than classify thumbnails (300px) because we send ALL images in one call.
+# Keeping them at 200px / quality 60 keeps the JSON payload under ~400KB for
+# batches of 30, well within OpenRouter's request-body limit.
+_GROUP_THUMB_PX = 200
+_GROUP_THUMB_Q  = 60
 
-def encode_image(path, max_size=300):
+
+def encode_image(path, max_size=_GROUP_THUMB_PX):
     with Image.open(path) as img:
         if img.mode in ("RGBA", "P"):
             img = img.convert("RGB")
         img.thumbnail((max_size, max_size), Image.LANCZOS)
         buffer = io.BytesIO()
-        img.save(buffer, format="JPEG", quality=70)
+        img.save(buffer, format="JPEG", quality=_GROUP_THUMB_Q)
         return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 
@@ -110,17 +116,21 @@ def visual_group_images(self, classify_results, job_ids: list):
             emit("job.status", {"job_id": job.id, "status": "GROUPING", "image_type": job.image_type})
         db.commit()
 
+        payload = {
+            "model": "google/gemini-2.5-flash",
+            "max_tokens": 8000,
+            "messages": [{"role": "user", "content": content}]
+        }
+        payload_kb = len(json.dumps(payload).encode()) / 1024
+        print(f"[GROUP] Sending request: {len(ordered_jobs)} images, payload={payload_kb:.0f}KB", flush=True)
+
         response = requests.post(
             OPENROUTER_URL,
             headers={
                 "Authorization": f"Bearer {OPENROUTER_API_KEY}",
                 "Content-Type": "application/json",
             },
-            json={
-                "model": "google/gemini-2.5-flash",
-                "max_tokens": 8000,
-                "messages": [{"role": "user", "content": content}]
-            },
+            json=payload,
             timeout=240.0
         )
 

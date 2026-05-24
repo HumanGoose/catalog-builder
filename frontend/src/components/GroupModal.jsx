@@ -213,36 +213,49 @@ export function GroupModal({ group, liveJobs, onClose, onImageClick, onRename, o
               <div
                 key={job.id}
                 onClick={() => { onClose(); onImageClick?.(job) }}
+                title={job.filename}
                 style={{
-                  borderRadius: 8, overflow: 'hidden',
-                  border: `2px solid ${STATUS_COLOR[job.status] || '#2a2a2a'}`,
+                  display: 'flex', flexDirection: 'column', gap: 4,
                   cursor: 'pointer',
-                  position: 'relative',
-                  aspectRatio: '1',
-                  background: '#0a0a0a',
-                  transition: 'border-color 0.12s, transform 0.12s',
+                  transition: 'transform 0.12s',
                 }}
                 onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.03)' }}
                 onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)' }}
               >
-                {src && (
-                  <img
-                    src={src}
-                    alt={job.filename}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                  />
-                )}
-                {role && ROLE_LABEL[role] && (
-                  <div style={{
-                    position: 'absolute', bottom: 4, left: 4,
-                    background: ROLE_COLOR[role] ? `${ROLE_COLOR[role]}dd` : 'rgba(0,0,0,0.8)',
-                    color: '#fff',
-                    fontSize: 10, fontWeight: 700, padding: '2px 6px',
-                    borderRadius: 4, letterSpacing: 0.5,
-                  }}>
-                    {ROLE_LABEL[role]}
-                  </div>
-                )}
+                <div style={{
+                  borderRadius: 8, overflow: 'hidden',
+                  border: `2px solid ${STATUS_COLOR[job.status] || '#2a2a2a'}`,
+                  position: 'relative',
+                  aspectRatio: '1',
+                  background: '#0a0a0a',
+                }}>
+                  {src && (
+                    <img
+                      src={src}
+                      alt={job.filename}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                    />
+                  )}
+                  {role && ROLE_LABEL[role] && (
+                    <div style={{
+                      position: 'absolute', bottom: 4, left: 4,
+                      background: ROLE_COLOR[role] ? `${ROLE_COLOR[role]}dd` : 'rgba(0,0,0,0.8)',
+                      color: '#fff',
+                      fontSize: 10, fontWeight: 700, padding: '2px 6px',
+                      borderRadius: 4, letterSpacing: 0.5,
+                    }}>
+                      {ROLE_LABEL[role]}
+                    </div>
+                  )}
+                </div>
+                <div style={{
+                  fontSize: 9, fontFamily: '"DM Mono", monospace',
+                  color: '#555', letterSpacing: '0.03em',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  textAlign: 'center',
+                }}>
+                  {job.filename || job.id.slice(0, 8)}
+                </div>
               </div>
             )
           })}

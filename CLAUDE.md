@@ -9,8 +9,8 @@ A full-stack automated garment catalog builder built as a job application projec
 - **Database:** PostgreSQL 16 via SQLAlchemy (psycopg2-binary); `postgres_data` named volume persists across restarts
 - **Image processing:** Pillow (EXIF correction, brightness/contrast enhancement, resize by type)
 - **AI:** OpenRouter API — two models:
-  - `google/gemini-2.0-flash-lite-001` for per-image classification
-  - `google/gemini-2.5-flash` for visual batch grouping and spec extraction
+  - `google/gemini-2.0-flash-lite-001` for per-image classification and spec extraction
+  - `google/gemini-2.5-flash` for visual batch grouping
 - **PPT generation:** python-pptx (planned)
 - **Frontend:** React 18 + Tailwind CSS + `@dnd-kit/core` (interactive canvas view)
 - **Infra:** Docker Compose (6 services: redis, postgres, api, worker, flower, frontend)
@@ -44,9 +44,9 @@ After grouping, each job gets one of:
 
 | Task | File | What it does |
 |------|------|-------------|
-| `classify_image` | `pipeline/tasks/classify.py` | Resizes image to 300px thumbnail before sending (same as group.py) — sending full 3–6MB images causes 17–27s API calls; thumbnails bring it to ~1–2s. Sets `image_type` and `confidence` |
-| `visual_group_images` | `pipeline/tasks/group.py` | Sends all thumbnails (300px) in one multi-image call to Gemini 2.5 Flash; returns groups with `best_front`, `best_back`, `details`, `spec`, `duplicates`; writes `style_group` and refined `image_type` back to each Job; then fires one chord per group (process_image / extract_specs → assign_to_slide) |
-| `extract_specs` | `pipeline/tasks/extract.py` | For spec-type images, calls Gemini 2.5 Flash to parse the label and extract `reference_no`, `fabric`, `gsm`, `date`, `afs` into `Job.spec_data` |
+| `classify_image` | `pipeline/tasks/classify.py` | Resizes image to 300px thumbnail before sending — sending full 3–6MB images causes 17–27s API calls; thumbnails bring it to ~1–2s. Sets `image_type` and `confidence` |
+| `visual_group_images` | `pipeline/tasks/group.py` | Sends all thumbnails (**200px, quality 60** — smaller than classify to keep batch payload under ~400KB) in one multi-image call to Gemini 2.5 Flash; returns groups with `best_front`, `best_back`, `details`, `spec`, `duplicates`; writes `style_group` and refined `image_type` back to each Job; then fires one chord per group (process_image / extract_specs → assign_to_slide) |
+| `extract_specs` | `pipeline/tasks/extract.py` | For spec-type images, resizes to 800px thumbnail then calls Gemini 2.0 Flash Lite to parse the label and extract `reference_no`, `fabric`, `gsm`, `date`, `afs` into `Job.spec_data` |
 | `process_image` | `pipeline/tasks/process.py` | For front/back/detail images, applies EXIF correction, brightness/contrast enhancement, and resizes (front/back→1200px, detail→600px); writes result to `storage/processed/` |
 | `assign_to_slide` | `pipeline/tasks/assign_to_slide.py` | Chord callback per group — waits for all per-job tasks to finish, picks best image per role by confidence, merges spec data, upserts `GarmentGroup` and `Slide` records, marks all eligible jobs `ASSIGNED` |
 | `emit` (helper)   | `pipeline/events.py`                | Called by every task to publish job status events to Redis channel `catalog:events`; FastAPI startup subscribes and broadcasts to all connected WS clients |
@@ -201,6 +201,8 @@ Both `useJobs` and `useGroups` start empty and never auto-load DB history:
 
 `useGroups` exposes `createGroup(name)`, `renameGroup(groupId, newName)`, `deleteGroup(groupId)` — each calls the REST API and updates local state optimistically. Also handles `group.created`, `group.updated`, `group.deleted` WS events (for multi-tab sync).
 
+`App.jsx` guards `group.complete` events before forwarding to `handleGroupEvent`: if the group is not already in state AND no current-session job has `style_group === event.group`, the event is from a stale Celery task (prior pipeline run) and the group update is dropped. Job and slide handlers still receive it. Uses refs (`jobsRef`/`groupsRef`) so the guard always reads current state without adding deps to the `useCallback`.
+
 `useJobs` handles `group.deleted` — resets all in-memory jobs whose `style_group` matches the deleted group's `style_name` to `NEEDS_REVIEW`.
 
 `useSlides` handles `group.complete` (adds/refreshes a slide by fetching `slide_id`) and `group.deleted` (removes the matching slide by `group_id`). Slides are keyed by `id`; matched to groups via `slide.group_id`.
@@ -273,6 +275,11 @@ Key variables: `OPENROUTER_API_KEY`, `REDIS_URL`, `DATABASE_URL`, `CELERY_BROKER
 - Jobs are set to `GROUPING` *before* the OpenRouter API call. If the call fails (e.g. BrokenPipeError), the Celery retry will find zero `CLASSIFIED` jobs and silently return `{'grouped': 0}`, leaving jobs stuck in `GROUPING` forever.
 - Fix: `valid_jobs` filter must accept both `"CLASSIFIED"` and `"GROUPING"` — already applied in `group.py`.
 - Timeout is 240s — large batches with many base64 thumbnails can take that long on Gemini 2.5 Flash.
+
+### visual_group_images payload size
+- All images are sent in a single JSON body. At 300px/quality-70 (~30–40KB each), 28 images = ~1.3MB — exceeds OpenRouter's request-body limit, causing `RemoteDisconnected` (server closes connection before responding). This looks identical to a network error.
+- Fix: thumbnails in `group.py` use 200px/quality-60 (~8–12KB each), keeping 30-image batches under ~400KB. Classify can stay at 300px because it sends one image at a time.
+- `[GROUP] Sending request: N images, payload=XXX KB` is logged before each call to diagnose size issues.
 
 ### Grouping prompt — detail role
 - Close-ups of graphics, prints, and embroidery on a garment are valid `details`. The prompt explicitly tells the model a graphic detail shot "may look very different from the full garment" and to use filename proximity to link it.

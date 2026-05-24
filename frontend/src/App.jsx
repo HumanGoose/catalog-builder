@@ -27,6 +27,8 @@ export default function App() {
   const [pipelineHeight, setPipelineHeight] = useState(220)
   const isDraggingDivider = useRef(false)
   const dividerDragStart = useRef({ y: 0, height: 0 })
+  const jobsRef = useRef({})
+  const groupsRef = useRef({})
 
   useEffect(() => {
     function onMouseMove(e) {
@@ -47,12 +49,26 @@ export default function App() {
   const { groups, handleEvent: handleGroupEvent, fetchAll: fetchGroups, moveJob, createGroup, renameGroup, deleteGroup } = useGroups()
   const { slides, handleEvent: handleSlideEvent, fetchAll: fetchSlides, updateSlide } = useSlides()
 
+  jobsRef.current = jobs
+  groupsRef.current = groups
+
   // Allow drag only after 8px of movement — short taps fire onClick on ImageThumbnail
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   )
 
   const handleEvent = useCallback((event) => {
+    // Guard: ignore group.complete for groups not in this session.
+    // Stale Celery tasks from a prior run can fire group.complete after a page reload;
+    // reject them if no current-session job references the group's canonical name.
+    if (event.event === 'group.complete' && !groupsRef.current[event.group_id]) {
+      const hasMatchingJob = Object.values(jobsRef.current).some(j => j.style_group === event.group)
+      if (!hasMatchingJob) {
+        handleJobEvent(event)
+        handleSlideEvent(event)
+        return
+      }
+    }
     handleJobEvent(event)
     handleGroupEvent(event)
     handleSlideEvent(event)

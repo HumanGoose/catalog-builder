@@ -1,11 +1,23 @@
 import os
+import io
 import base64
 import json
 import requests
+from PIL import Image
 from celery_app import celery_app
 from models.database import SessionLocal
 from models.job import Job
 from pipeline.events import emit
+
+
+def _thumbnail_b64(path, max_size=800):
+    with Image.open(path) as img:
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        img.thumbnail((max_size, max_size), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -26,11 +38,8 @@ def extract_specs(self, job_id: str):
         db.commit()
         emit("job.status", {"job_id": job_id, "status": "EXTRACTING"})
 
-        with open(job.original_path, "rb") as f:
-            image_data = base64.b64encode(f.read()).decode("utf-8")
-
-        ext = os.path.splitext(job.original_path)[1].lower()
-        media_type = "image/jpeg" if ext in [".jpg", ".jpeg"] else "image/png"
+        image_data = _thumbnail_b64(job.original_path)
+        media_type = "image/jpeg"
 
         prompt = """Extract the specification data from this garment label image.
 
@@ -59,7 +68,7 @@ Respond with only this JSON:
                 "Content-Type": "application/json",
             },
             json={
-                "model": "google/gemini-2.5-flash",
+                "model": "google/gemini-2.0-flash-lite-001",
                 "max_tokens": 200,
                 "messages": [
                     {
