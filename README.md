@@ -38,6 +38,9 @@ Open `.env` and replace `your_openrouter_api_key_here` with your actual OpenRout
 docker compose up redis postgres api worker worker-process frontend
 ```
 
+To also start Flower (Celery task monitoring at `http://localhost:5555`), add `flower` to the command.
+
+
 The first run will build the Docker images, which takes a few minutes. Subsequent starts are fast.
 
 **4. Open the app**
