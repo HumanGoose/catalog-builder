@@ -330,7 +330,14 @@ function SlideCanvas({ slide, compact, layout, onLayoutChange, selected, onSelec
               {editingSpecs ? (
                 <textarea
                   defaultValue={specs}
-                  onChange={e => { specsTextRef.current = e.target.value }}
+                  ref={el => {
+                    if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px' }
+                  }}
+                  onChange={e => {
+                    specsTextRef.current = e.target.value
+                    e.target.style.height = 'auto'
+                    e.target.style.height = e.target.scrollHeight + 'px'
+                  }}
                   onBlur={() => { setEditingSpecs(false); onSpecsSave?.(specsTextRef.current) }}
                   onKeyDown={e => {
                     if (e.key === 'Escape') { specsTextRef.current = specs; setEditingSpecs(false) }
@@ -339,7 +346,7 @@ function SlideCanvas({ slide, compact, layout, onLayoutChange, selected, onSelec
                   onMouseDown={e => e.stopPropagation()}
                   autoFocus
                   style={{
-                    width: '100%', minHeight: 80, resize: 'none',
+                    width: '100%', resize: 'none', overflow: 'hidden',
                     border: 'none', outline: 'none', background: 'transparent',
                     fontSize: specsSize ?? 14, fontFamily: 'Calibri, "Segoe UI", sans-serif',
                     color: '#1a1a1a', lineHeight: 1.4, whiteSpace: 'pre',
@@ -677,7 +684,6 @@ export function CatalogView({ slides, onSave }) {
             Export
           </span>
           <Btn label={exporting === 'pptx' ? '↻ PPTX…' : '↓ PPTX'} disabled={!hasSlides || !!exporting} onClick={() => handleExport('pptx')} />
-          <Btn label={exporting === 'pdf'  ? '↻ PDF…'  : '↓ PDF'}  disabled={!hasSlides || !!exporting} onClick={() => handleExport('pdf')} />
           <div style={{ width: 1, height: 16, background: 'var(--border)', margin: '0 4px', flexShrink: 0 }} />
           <span style={{ fontSize: 9, fontFamily: '"DM Mono", monospace', color: 'var(--text-faint)', letterSpacing: '0.06em' }}>Aa</span>
           <Btn label="−" onClick={() => setSpecsSize(s => Math.max(8, s - 1))} disabled={specsSize <= 8} />
