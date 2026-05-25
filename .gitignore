@@ -27,9 +27,11 @@ frontend/.next/
 backend/storage/uploads/*
 backend/storage/processed/*
 backend/storage/output/*
+backend/storage/logo/*
 !backend/storage/uploads/.gitkeep
 !backend/storage/processed/.gitkeep
 !backend/storage/output/.gitkeep
+!backend/storage/logo/.gitkeep
 
 # OS noise
 .DS_Store

@@ -21,22 +21,22 @@ function defaultLayout(slide) {
   if (hasDetail) {
     return {
       front:  { left: 5,   top: 17, width: 462, height: 662, rotation: 0 },
-      back:   { left: 471, top: 17, width: 459, height: 662, rotation: 0 },
-      detail: { left: 934, top: 17, width: 395, height: 400, rotation: 0 },
-      specs:  { left: 928, top: 430, width: 400 },
+      back:   { left: 471, top: 17, width: 460, height: 662, rotation: 0 },
+      detail: { left: 934, top: 17, width: 395, height: 242, rotation: 0 },
+      specs:  { left: 928, top: 517, width: 448 },
     }
   }
   if (hasFront && hasBack) {
     return {
       front: { left: 5,   top: 17, width: 462, height: 662, rotation: 0 },
-      back:  { left: 471, top: 17, width: 459, height: 662, rotation: 0 },
-      specs: { left: 928, top: 517, width: 400 },
+      back:  { left: 471, top: 17, width: 460, height: 662, rotation: 0 },
+      specs: { left: 928, top: 517, width: 448 },
     }
   }
   const imgKey = hasFront ? 'front' : 'back'
   return {
-    [imgKey]: { left: 5, top: 17, width: 925, height: 662, rotation: 0 },
-    specs:    { left: 928, top: 517, width: 400 },
+    [imgKey]: { left: 200, top: 50, width: 900, height: 650, rotation: 0 },
+    specs:    { left: 928, top: 517, width: 448 },
   }
 }
 
@@ -74,11 +74,12 @@ function ResizeHandle({ pos, onMouseDown }) {
 }
 
 // ── Draggable + resizable element wrapper ─────────────────────────────────────
-function EditableEl({ elKey, el, scale, zIndex, selected, onSelect, onLayoutChange, label, hasHeight, children }) {
+function EditableEl({ elKey, el, scale, zIndex, selected, onSelect, onLayoutChange, label, hasHeight, isEditing, onDoubleClick, children }) {
   if (!el) return null
   const rot = el.rotation || 0
 
   function startMove(e) {
+    if (isEditing) return
     e.stopPropagation()
     e.preventDefault()
     onSelect(elKey)
@@ -148,6 +149,7 @@ function EditableEl({ elKey, el, scale, zIndex, selected, onSelect, onLayoutChan
   return (
     <div
       onMouseDown={startMove}
+      onDoubleClick={onDoubleClick}
       style={{
         position: 'absolute',
         left: el.left, top: el.top,
@@ -155,7 +157,7 @@ function EditableEl({ elKey, el, scale, zIndex, selected, onSelect, onLayoutChan
         ...(el.height !== undefined ? { height: el.height } : {}),
         transform: rot ? `rotate(${rot}deg)` : undefined,
         transformOrigin: 'center center',
-        cursor: 'move',
+        cursor: isEditing ? 'text' : 'move',
         zIndex: isSel ? 100 : zIndex,
         outline: isSel ? '2px solid rgba(196,150,106,0.9)' : '1.5px solid transparent',
         boxSizing: 'border-box',
@@ -187,10 +189,15 @@ function EditableEl({ elKey, el, scale, zIndex, selected, onSelect, onLayoutChan
 }
 
 // ── Slide canvas ──────────────────────────────────────────────────────────────
-function SlideCanvas({ slide, compact, layout, onLayoutChange, selected, onSelect }) {
-  const wrapRef       = useRef()  // outer container (measures scale)
-  const innerRef      = useRef()  // inner 1333×750 canvas (used for rotation angle math)
+function SlideCanvas({ slide, compact, layout, onLayoutChange, selected, onSelect, logoUrl, logoLayout, onLogoLayoutChange, specsSize, onSpecsSave }) {
+  const wrapRef       = useRef()
+  const innerRef      = useRef()
   const [scale, setScale] = useState(0)
+  const [editingSpecs, setEditingSpecs] = useState(false)
+  const specsTextRef  = useRef('')
+
+  useEffect(() => { setEditingSpecs(false) }, [slide?.id])
+  useEffect(() => { if (selected !== 'specs') setEditingSpecs(false) }, [selected])
 
   useEffect(() => {
     const el = wrapRef.current
@@ -253,12 +260,16 @@ function SlideCanvas({ slide, compact, layout, onLayoutChange, selected, onSelec
               <div style={{
                 position: 'absolute',
                 left: layout.specs.left, top: layout.specs.top, width: layout.specs.width,
-                fontSize: 14, fontFamily: 'Calibri, sans-serif',
-                color: '#1a1a1a', lineHeight: 2, whiteSpace: 'pre', zIndex: 5,
-                background: 'rgba(255,255,255,0.9)', padding: '4px 6px',
+                fontSize: specsSize ?? 14, fontFamily: 'Calibri, "Segoe UI", sans-serif',
+                color: '#1a1a1a', lineHeight: 1.4, whiteSpace: 'pre', zIndex: 5,
               }}>
                 {specs}
               </div>
+            )}
+            {logoUrl && logoLayout && (
+              <img src={logoUrl} alt="" draggable={false}
+                style={{ position: 'absolute', left: logoLayout.left, top: logoLayout.top, width: logoLayout.width, height: logoLayout.height, objectFit: 'contain', zIndex: 6 }}
+              />
             )}
           </div>
         )}
@@ -312,17 +323,56 @@ function SlideCanvas({ slide, compact, layout, onLayoutChange, selected, onSelec
             </EditableEl>
           )}
           {specs && layout.specs && (
-            <EditableEl {...elProps('specs', 4, false)} label="SPECS">
-              <div style={{
-                width: '100%',
-                fontSize: 17, fontFamily: 'Calibri, "Segoe UI", sans-serif',
-                color: '#1a1a1a', lineHeight: 2.1,
-                whiteSpace: 'pre', letterSpacing: 0.3,
-                background: 'rgba(255,255,255,0.9)',
-                padding: '8px 10px', borderRadius: 1,
-              }}>
-                {specs}
-              </div>
+            <EditableEl {...elProps('specs', 4, false)} label="SPECS · dbl-click to edit"
+              isEditing={editingSpecs}
+              onDoubleClick={() => { specsTextRef.current = specs; setEditingSpecs(true) }}
+            >
+              {editingSpecs ? (
+                <textarea
+                  defaultValue={specs}
+                  onChange={e => { specsTextRef.current = e.target.value }}
+                  onBlur={() => { setEditingSpecs(false); onSpecsSave?.(specsTextRef.current) }}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') { specsTextRef.current = specs; setEditingSpecs(false) }
+                    e.stopPropagation()
+                  }}
+                  onMouseDown={e => e.stopPropagation()}
+                  autoFocus
+                  style={{
+                    width: '100%', minHeight: 80, resize: 'none',
+                    border: 'none', outline: 'none', background: 'transparent',
+                    fontSize: specsSize ?? 14, fontFamily: 'Calibri, "Segoe UI", sans-serif',
+                    color: '#1a1a1a', lineHeight: 1.4, whiteSpace: 'pre',
+                    letterSpacing: 0.3, padding: 0, cursor: 'text',
+                  }}
+                />
+              ) : (
+                <div style={{
+                  width: '100%',
+                  fontSize: specsSize ?? 14, fontFamily: 'Calibri, "Segoe UI", sans-serif',
+                  color: '#1a1a1a', lineHeight: 1.4,
+                  whiteSpace: 'pre', letterSpacing: 0.3,
+                }}>
+                  {specs}
+                </div>
+              )}
+            </EditableEl>
+          )}
+          {logoUrl && logoLayout && (
+            <EditableEl
+              elKey="logo"
+              el={logoLayout}
+              scale={scale}
+              zIndex={7}
+              hasHeight={true}
+              selected={selected}
+              onSelect={onSelect}
+              onLayoutChange={(_, newEl) => onLogoLayoutChange?.(newEl)}
+              label="LOGO"
+            >
+              <img src={logoUrl} alt="" draggable={false}
+                style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', pointerEvents: 'none' }}
+              />
             </EditableEl>
           )}
         </div>
@@ -449,7 +499,7 @@ function Btn({ label, disabled, onClick, muted }) {
 }
 
 // ── Export — POST with session slide IDs, pixel layouts, and rotations ────────
-async function doExport(format, slideList, layouts) {
+async function doExport(format, slideList, layouts, logoLayout, specsSize) {
   const slideIds = slideList.map(s => s.id)
   const layoutsBody = {}
   for (const slide of slideList) {
@@ -465,7 +515,12 @@ async function doExport(format, slideList, layouts) {
   const res = await fetch(`${API}/export/${format}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ slide_ids: slideIds, layouts: layoutsBody }),
+    body: JSON.stringify({
+      slide_ids: slideIds,
+      layouts: layoutsBody,
+      logo_layout: logoLayout ?? null,
+      specs_font_pt: specsSize ? +(specsSize * 72 / 100).toFixed(2) : null,
+    }),
   })
   if (!res.ok) throw new Error(`Export failed: ${res.status}`)
 
@@ -480,6 +535,21 @@ async function doExport(format, slideList, layouts) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+function parseSpecsText(text) {
+  const fields = {}
+  for (const line of text.split('\n')) {
+    const colonIdx = line.indexOf(':')
+    if (colonIdx === -1) continue
+    const key = line.slice(0, colonIdx).trim().toLowerCase()
+    const val = line.slice(colonIdx + 1).trim() || null
+    if (key.startsWith('ref'))                       fields.ref_number = val
+    else if (key.startsWith('afs'))                  fields.afs = val
+    else if (key.startsWith('comp') || key.startsWith('fab')) fields.fabric = val
+    else if (key.startsWith('gsm'))                  fields.gsm = val
+  }
+  return fields
+}
+
 // ── Main CatalogView ──────────────────────────────────────────────────────────
 export function CatalogView({ slides, onSave }) {
   const slideList = Object.values(slides).sort(
@@ -489,6 +559,16 @@ export function CatalogView({ slides, onSave }) {
   const [layouts,    setLayouts]    = useState({})
   const [selectedEl, setSelectedEl] = useState(null)
   const [exporting,  setExporting]  = useState(null)
+  const [logoUrl,    setLogoUrl]    = useState(null)
+  const [logoLayout, setLogoLayout] = useState({ left: 1252, top: 681, width: 55, height: 50 })
+  const [specsSize,  setSpecsSize]  = useState(14)
+
+  useEffect(() => {
+    fetch(`${API}/logo`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.exists) setLogoUrl(`${API}${d.url}`) })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (!selectedId && slideList.length > 0) setSelectedId(slideList[0].id)
@@ -519,8 +599,16 @@ export function CatalogView({ slides, onSave }) {
   async function handleExport(fmt) {
     if (!hasSlides || exporting) return
     setExporting(fmt)
-    try { await doExport(fmt, slideList, layouts) } catch (e) { console.error(e) }
+    try { await doExport(fmt, slideList, layouts, logoLayout, specsSize) } catch (e) { console.error(e) }
     setExporting(null)
+  }
+
+  async function handleSpecsSave(rawText) {
+    if (!selected) return
+    const fields = parseSpecsText(rawText)
+    if (Object.keys(fields).length > 0) {
+      try { await onSave(selected.id, fields) } catch {}
+    }
   }
 
   const selLayout = (selected && selectedEl) ? (getLayout(selected)[selectedEl] ?? null) : null
@@ -562,7 +650,7 @@ export function CatalogView({ slides, onSave }) {
                   boxShadow: slide.id === selectedId ? '0 0 0 1px rgba(196,150,106,0.3)' : 'none',
                   transition: 'border-color 0.15s',
                 }}>
-                  <SlideCanvas slide={slide} compact layout={getLayout(slide)} />
+                  <SlideCanvas slide={slide} compact layout={getLayout(slide)} logoUrl={logoUrl} logoLayout={logoLayout} specsSize={specsSize} />
                 </div>
                 <p style={{
                   margin: '4px 0 0', fontSize: 9,
@@ -590,6 +678,11 @@ export function CatalogView({ slides, onSave }) {
           </span>
           <Btn label={exporting === 'pptx' ? '↻ PPTX…' : '↓ PPTX'} disabled={!hasSlides || !!exporting} onClick={() => handleExport('pptx')} />
           <Btn label={exporting === 'pdf'  ? '↻ PDF…'  : '↓ PDF'}  disabled={!hasSlides || !!exporting} onClick={() => handleExport('pdf')} />
+          <div style={{ width: 1, height: 16, background: 'var(--border)', margin: '0 4px', flexShrink: 0 }} />
+          <span style={{ fontSize: 9, fontFamily: '"DM Mono", monospace', color: 'var(--text-faint)', letterSpacing: '0.06em' }}>Aa</span>
+          <Btn label="−" onClick={() => setSpecsSize(s => Math.max(8, s - 1))} disabled={specsSize <= 8} />
+          <span style={{ fontSize: 10, fontFamily: '"DM Mono", monospace', color: 'var(--text-muted)', minWidth: 20, textAlign: 'center' }}>{specsSize}</span>
+          <Btn label="+" onClick={() => setSpecsSize(s => Math.min(40, s + 1))} disabled={specsSize >= 40} />
           {selected && (
             <>
               <div style={{ flex: 1 }} />
@@ -626,6 +719,11 @@ export function CatalogView({ slides, onSave }) {
                 onLayoutChange={handleLayoutChange}
                 selected={selectedEl}
                 onSelect={setSelectedEl}
+                logoUrl={logoUrl}
+                logoLayout={logoLayout}
+                onLogoLayoutChange={setLogoLayout}
+                specsSize={specsSize}
+                onSpecsSave={handleSpecsSave}
               />
             </div>
           ) : (

@@ -1,11 +1,12 @@
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from models.database import engine, Base
 import models.job
-from api.routes import upload, jobs, groups, export
+from api.routes import upload, jobs, groups, export, logo
 from api.routes.ws import router as ws_router
 from api.ws.manager import redis_subscriber
 
@@ -32,13 +33,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+os.makedirs("storage/logo", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="storage/uploads"), name="uploads")
 app.mount("/processed", StaticFiles(directory="storage/processed"), name="processed")
+app.mount("/logo-img", StaticFiles(directory="storage/logo"), name="logo-img")
 
 app.include_router(upload.router)
 app.include_router(jobs.router)
 app.include_router(groups.router)
 app.include_router(export.router)
+app.include_router(logo.router)
 app.include_router(ws_router)
 
 @app.get("/health")

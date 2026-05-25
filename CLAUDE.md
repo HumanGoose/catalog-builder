@@ -11,7 +11,7 @@ A full-stack automated garment catalog builder built as a job application projec
 - **AI:** OpenRouter API — two models:
   - `google/gemini-2.0-flash-lite-001` for per-image classification and spec extraction
   - `google/gemini-2.5-flash` for visual batch grouping
-- **PPT generation:** python-pptx (planned)
+- **PPT generation:** python-pptx — `pipeline/export_pptx.py`; `build_catalog_pptx(slides_data, logo_path, logo_pos, specs_font_pt)`
 - **Frontend:** React 18 + Tailwind CSS + `@dnd-kit/core` (interactive canvas view)
 - **Infra:** Docker Compose (6 services: redis, postgres, api, worker, flower, frontend)
 - **Worker pool:** gevent (`--pool=gevent --concurrency=20`) — I/O-bound tasks (API calls) run as greenlets, not processes
@@ -98,15 +98,20 @@ WS     /ws              — WebSocket for real-time pipeline events (push-only; 
 
 Static file mounts: `/uploads/*` and `/processed/*`
 
-### Also implemented (in `api/routes/export.py`)
+### Also implemented (in `api/routes/export.py` and `api/routes/logo.py`)
 
 ```
 GET    /slides          — list slides
 GET    /slides/{id}     — single slide
 PATCH  /slides/{id}     — edit slide fields; sets is_edited=True to prevent pipeline overwrites
-POST   /export/pptx     — session-scoped export: accepts {slide_ids, layouts}
-POST   /export/pdf      — same as pptx but converts via LibreOffice (requires libreoffice-impress in container)
+POST   /export/pptx     — accepts {slide_ids, layouts, logo_layout (px), specs_font_pt (pt)}
+POST   /export/pdf      — same as pptx; returns 503 if LibreOffice absent (NOT installed by default)
+GET    /logo            — {exists, url} for current logo
+POST   /logo            — upload logo; saved to storage/logo/current.<ext>; served at /logo-img/
+DELETE /logo            — remove logo
 ```
+
+Static file mounts: `/uploads/*`, `/processed/*`, `/logo-img/*` — don't reuse these prefixes for API routes
 
 ## Folder Structure
 
@@ -125,6 +130,7 @@ catalog-builder/
 │   │   │   ├── upload.py        ← POST /upload (chord dispatch)
 │   │   │   ├── jobs.py          ← GET /jobs, GET /jobs/{id}, PATCH /jobs/{id}
 │   │   │   ├── groups.py        ← GET/POST /groups, GET/PATCH/DELETE /groups/{id}
+│   │   │   ├── logo.py          ← GET/POST/DELETE /logo
 │   │   │   └── ws.py            ← WS /ws endpoint
 │   │   └── ws/
 │   │       └── manager.py       ← ConnectionManager + redis_subscriber (started on FastAPI startup)
@@ -142,7 +148,8 @@ catalog-builder/
 │   └── storage/
 │       ├── uploads/             ← raw incoming images
 │       ├── processed/           ← cleaned + resized images
-│       └── output/              ← final Catalog.pptx (planned)
+│       ├── logo/                ← logo stored as current.<ext>; gitignored via .gitkeep pattern
+│       └── output/              ← final Catalog.pptx
 └── frontend/
     ├── src/
     │   ├── App.jsx              ← root; DndContext lives here so Canvas + Tray share one drag context
@@ -211,7 +218,10 @@ Both `useJobs` and `useGroups` start empty and never auto-load DB history:
 
 ```bash
 # Start all services
-docker compose up redis postgres api worker worker-process flower
+docker compose up --build
+
+# Fresh start — wipe DB, storage, and rebuild images
+docker compose down && docker volume rm catalog-builder_postgres_data && rm -f backend/storage/uploads/* backend/storage/processed/* backend/storage/logo/current.* && docker compose up --build
 
 # View worker logs
 docker compose logs -f worker
@@ -284,6 +294,26 @@ Key variables: `OPENROUTER_API_KEY`, `REDIS_URL`, `DATABASE_URL`, `CELERY_BROKER
 ### Grouping prompt — detail role
 - Close-ups of graphics, prints, and embroidery on a garment are valid `details`. The prompt explicitly tells the model a graphic detail shot "may look very different from the full garment" and to use filename proximity to link it.
 - Prompt lives in `pipeline/tasks/group.py` — search for `=== RULE 2`.
+
+### Canvas ↔ PPT coordinate system
+- Canvas is 1333×750px = 13.33"×7.50" at **100px/inch**: `inches × 100 = canvas_px`, `pt × 100/72 = canvas_px`
+- `defaultLayout` in `CatalogView.jsx` must exactly match PPT default coordinates in `export_pptx.py` — any mismatch causes visible preview/export drift
+- Logo reference position: canvas (1252, 681, 55×50) = PPT (12.52", 6.81", 0.55"×0.50") — sourced from `reference/TT AW26 SL SELECTION.pptx`
+- To inspect shape positions in a PPTX on the host (no local python-pptx): `python3 -c "import zipfile, xml.etree.ElementTree as ET; EMU=914400; z=zipfile.ZipFile('file.pptx'); root=ET.fromstring(z.read('ppt/slides/slide1.xml')); [print(f'left={int(o.get(\"x\",0))/EMU:.2f} top={int(o.get(\"y\",0))/EMU:.2f} w={int(e.get(\"cx\",0))/EMU:.2f} h={int(e.get(\"cy\",0))/EMU:.2f}') for x in root.iter('{http://schemas.openxmlformats.org/drawingml/2006/main}xfrm') for o in [x.find('{http://schemas.openxmlformats.org/drawingml/2006/main}off')] for e in [x.find('{http://schemas.openxmlformats.org/drawingml/2006/main}ext')] if o is not None]"`
+
+### CatalogView — global vs per-slide state
+- Per-slide layout overrides: `layouts[slide.id]` (position/size of front/back/detail/specs per slide)
+- Global state shared across all slides: `logoLayout` (position/size), `specsSize` (canvas px → pt via `× 72/100`)
+- `ExportRequest` receives both: `logo_layout` (canvas px, backend converts to inches via `_el_to_inches`) and `specs_font_pt`
+- Logo dragging uses `EditableEl` with `onLayoutChange={(_, newEl) => onLogoLayoutChange(newEl)}` — routes to global setter, not per-slide `layouts`
+
+### `requests` is an explicit dependency
+- Used directly by Celery tasks (`classify.py`, `group.py`, `extract.py`) for OpenRouter API calls
+- Was previously a hidden transitive dep of `rembg` (now removed) — keep it in `requirements.txt` explicitly or all workers crash at startup with `ModuleNotFoundError: No module named 'requests'`
+
+### libreoffice-impress is NOT installed
+- Removed from Dockerfile — was ~400MB and only used by `POST /export/pdf`
+- PDF export returns 503 gracefully when LibreOffice is absent — don't add it back unless PDF export is a hard requirement
 
 ### Slide ↔ Job matching
 - `slide.style_number` = canonical group slug — always matches `job.style_group`; use this for joins

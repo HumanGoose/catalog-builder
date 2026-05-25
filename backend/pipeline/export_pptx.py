@@ -82,7 +82,7 @@ def _add_picture(slide, path, box_left_in, box_top_in, box_w_in, box_h_in, rotat
         logger.warning("export_pptx: could not add picture %s: %s", path, exc)
 
 
-def _add_specs(slide, text, left_in, top_in, width_in, height_in=2.1):
+def _add_specs(slide, text, left_in, top_in, width_in, height_in=2.1, font_pt=10):
     if not text:
         return
     txBox = slide.shapes.add_textbox(
@@ -96,7 +96,7 @@ def _add_specs(slide, text, left_in, top_in, width_in, height_in=2.1):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
         run = p.add_run()
         run.text = line
-        run.font.size = Pt(8)
+        run.font.size = Pt(font_pt)
         run.font.name = "Calibri"
         run.font.color.rgb = RGBColor(0x1A, 0x1A, 0x1A)
 
@@ -106,7 +106,26 @@ def _el(lo: dict, key: str, default: dict) -> dict:
     return lo.get(key) or default
 
 
-def _add_garment_slide(prs, slide_data: dict):
+LOGO_LEFT_IN  = 12.52
+LOGO_TOP_IN   = 6.81
+LOGO_W_IN     = 0.55
+LOGO_H_IN     = 0.50
+
+
+def _add_logo(slide, logo_path: str | None, pos: dict | None = None):
+    if not logo_path:
+        return
+    resolved = _resolve(logo_path)
+    if not resolved or not os.path.exists(resolved):
+        return
+    left = pos["left"]            if pos else LOGO_LEFT_IN
+    top  = pos["top"]             if pos else LOGO_TOP_IN
+    w    = pos["width"]           if pos else LOGO_W_IN
+    h    = pos.get("height", LOGO_H_IN) if pos else LOGO_H_IN
+    _add_picture(slide, resolved, left, top, w, h)
+
+
+def _add_garment_slide(prs, slide_data: dict, logo_path: str | None = None, logo_pos: dict | None = None, font_pt: float = 10):
     layout = prs.slide_layouts[6]  # Blank
     slide = prs.slides.add_slide(layout)
 
@@ -137,7 +156,7 @@ def _add_garment_slide(prs, slide_data: dict):
         if has_back:
             _add_picture(slide, back,   bl["left"], bl["top"], bl["width"], bl.get("height", 6.62), bl.get("rotation", 0))
         _add_picture(slide, detail, dl["left"], dl["top"], dl["width"], dl.get("height", 2.42), dl.get("rotation", 0))
-        _add_specs(slide, specs, sl["left"], sl["top"], sl["width"], sl.get("height", 1.62))
+        _add_specs(slide, specs, sl["left"], sl["top"], sl["width"], sl.get("height", 1.62), font_pt=font_pt)
 
     elif has_front and has_back:
         fl = _el(lo, "front", {"left": 0.05, "top": 0.17, "width": 4.62, "height": 6.62})
@@ -145,7 +164,7 @@ def _add_garment_slide(prs, slide_data: dict):
         sl = _el(lo, "specs", {"left": 9.28, "top": 5.17, "width": 4.48, "height": 1.62})
         _add_picture(slide, front, fl["left"], fl["top"], fl["width"], fl.get("height", 6.62), fl.get("rotation", 0))
         _add_picture(slide, back,  bl["left"], bl["top"], bl["width"], bl.get("height", 6.62), bl.get("rotation", 0))
-        _add_specs(slide, specs, sl["left"], sl["top"], sl["width"], sl.get("height", 1.62))
+        _add_specs(slide, specs, sl["left"], sl["top"], sl["width"], sl.get("height", 1.62), font_pt=font_pt)
 
     else:
         img_key = "front" if has_front else ("back" if has_back else "detail")
@@ -154,16 +173,19 @@ def _add_garment_slide(prs, slide_data: dict):
         sl = _el(lo, "specs", {"left": 9.28, "top": 5.17, "width": 4.48, "height": 1.62})
         if img:
             _add_picture(slide, img, il["left"], il["top"], il["width"], il.get("height", 6.5), il.get("rotation", 0))
-        _add_specs(slide, specs, sl["left"], sl["top"], sl["width"], sl.get("height", 1.62))
+        _add_specs(slide, specs, sl["left"], sl["top"], sl["width"], sl.get("height", 1.62), font_pt=font_pt)
+
+    _add_logo(slide, logo_path, pos=logo_pos)
 
 
-def build_catalog_pptx(slides_data: list[dict]) -> bytes:
+def build_catalog_pptx(slides_data: list[dict], logo_path: str | None = None, logo_pos: dict | None = None, specs_font_pt: float | None = None) -> bytes:
     prs = Presentation()
     prs.slide_width  = Inches(SLIDE_W_IN)
     prs.slide_height = Inches(SLIDE_H_IN)
+    font_pt = specs_font_pt if specs_font_pt else 10
 
     for sd in slides_data:
-        _add_garment_slide(prs, sd)
+        _add_garment_slide(prs, sd, logo_path=logo_path, logo_pos=logo_pos, font_pt=font_pt)
 
     buf = io.BytesIO()
     prs.save(buf)

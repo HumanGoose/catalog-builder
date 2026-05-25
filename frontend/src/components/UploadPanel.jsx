@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -9,6 +9,35 @@ export function UploadPanel({ onUploaded }) {
   const [error, setError] = useState(null)
   const inputRef = useRef(null)
   const dragCounter = useRef(0)
+
+  const [logoPreview, setLogoPreview] = useState(null)
+  const [logoUploading, setLogoUploading] = useState(false)
+  const logoInputRef = useRef(null)
+
+  useEffect(() => {
+    fetch(`${API}/logo`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.exists) setLogoPreview(`${API}${d.url}`) })
+      .catch(() => {})
+  }, [])
+
+  const uploadLogo = useCallback(async (file) => {
+    if (!file) return
+    setLogoUploading(true)
+    const preview = URL.createObjectURL(file)
+    setLogoPreview(preview)
+    const fd = new FormData()
+    fd.append('file', file)
+    try {
+      await fetch(`${API}/logo`, { method: 'POST', body: fd })
+    } catch (_) {}
+    setLogoUploading(false)
+  }, [])
+
+  const removeLogo = useCallback(async () => {
+    setLogoPreview(null)
+    await fetch(`${API}/logo`, { method: 'DELETE' }).catch(() => {})
+  }, [])
 
   const upload = useCallback(async (files) => {
     if (!files?.length) return
@@ -122,6 +151,64 @@ export function UploadPanel({ onUploaded }) {
           {error}
         </div>
       )}
+
+      {/* Logo upload */}
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '14px' }}>
+        <p style={{ margin: '0 0 8px', fontSize: '10px', color: 'var(--text-faint)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          Slide logo <span style={{ color: 'var(--text-faint)', opacity: 0.5 }}>· bottom-right</span>
+        </p>
+        <input
+          ref={logoInputRef}
+          type="file"
+          accept="image/*"
+          onChange={e => { uploadLogo(e.target.files[0]); e.target.value = '' }}
+          style={{ display: 'none' }}
+        />
+        {logoPreview ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{
+              width: 48, height: 48, borderRadius: '3px',
+              border: '1px solid rgba(196,150,106,0.25)',
+              background: 'rgba(255,255,255,0.03)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              overflow: 'hidden', flexShrink: 0,
+            }}>
+              <img src={logoPreview} alt="logo" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: '0 0 4px', fontSize: '11px', color: 'var(--gold)', fontFamily: '"DM Mono", monospace' }}>
+                {logoUploading ? 'uploading…' : 'logo set'}
+              </p>
+              <button
+                onClick={() => logoInputRef.current?.click()}
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: '10px', color: 'var(--text-muted)', textDecoration: 'underline', marginRight: 8 }}
+              >
+                replace
+              </button>
+              <button
+                onClick={removeLogo}
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: '10px', color: '#FF6B6B', textDecoration: 'underline' }}
+              >
+                remove
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => logoInputRef.current?.click()}
+            style={{
+              width: '100%', padding: '10px', borderRadius: '3px', cursor: 'pointer',
+              border: '1px dashed rgba(255,255,255,0.12)', background: 'transparent',
+              fontSize: '11px', color: 'var(--text-muted)', fontFamily: '"DM Mono", monospace',
+              textAlign: 'center', transition: 'border-color 0.2s, color 0.2s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(196,150,106,0.4)'; e.currentTarget.style.color = 'var(--gold)' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; e.currentTarget.style.color = 'var(--text-muted)' }}
+          >
+            + add logo
+          </button>
+        )}
+      </div>
 
     </div>
   )

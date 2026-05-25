@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from models.database import SessionLocal
 from models.job import Slide
 from pipeline.export_pptx import build_catalog_pptx
+from api.routes.logo import find_logo
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -113,6 +114,8 @@ class SlideLayout(BaseModel):
 class ExportRequest(BaseModel):
     slide_ids: list[str]
     layouts: dict[str, SlideLayout] = {}
+    logo_layout: LayoutEl | None = None
+    specs_font_pt: float | None = None
 
 
 def _el_to_inches(el: LayoutEl) -> dict:
@@ -164,7 +167,11 @@ def export_pptx_session(body: ExportRequest, db: Session = Depends(get_db)):
     if not slides_data:
         raise HTTPException(404, "No slides found for the given IDs")
 
-    pptx_bytes = build_catalog_pptx(slides_data)
+    logo_pos = _el_to_inches(body.logo_layout) if body.logo_layout else None
+    pptx_bytes = build_catalog_pptx(
+        slides_data, logo_path=find_logo(),
+        logo_pos=logo_pos, specs_font_pt=body.specs_font_pt,
+    )
     return StreamingResponse(
         io.BytesIO(pptx_bytes),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -181,7 +188,11 @@ def export_pdf_session(body: ExportRequest, db: Session = Depends(get_db)):
     if not slides_data:
         raise HTTPException(404, "No slides found for the given IDs")
 
-    pptx_bytes = build_catalog_pptx(slides_data)
+    logo_pos = _el_to_inches(body.logo_layout) if body.logo_layout else None
+    pptx_bytes = build_catalog_pptx(
+        slides_data, logo_path=find_logo(),
+        logo_pos=logo_pos, specs_font_pt=body.specs_font_pt,
+    )
 
     with tempfile.TemporaryDirectory() as tmp:
         pptx_path = os.path.join(tmp, "catalog.pptx")
