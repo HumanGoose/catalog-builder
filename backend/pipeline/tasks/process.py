@@ -9,8 +9,9 @@ PROCESSED_DIR = "storage/processed"
 
 
 def clean_image(input_path, output_path, image_type):
-    img = Image.open(input_path).convert("RGB")
+    img = Image.open(input_path)
     img = ImageOps.exif_transpose(img)
+    img = img.convert("RGB")
     
     # Subtle enhancement for consistency across different cameras/lighting
     img = ImageEnhance.Brightness(img).enhance(1.05)

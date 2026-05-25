@@ -102,6 +102,7 @@ class LayoutEl(BaseModel):
     width: float
     height: float | None = None
     rotation: float | None = None
+    fit: str | None = None
 
 
 class SlideLayout(BaseModel):
@@ -128,6 +129,8 @@ def _el_to_inches(el: LayoutEl) -> dict:
         d["height"] = el.height / PX_PER_INCH
     if el.rotation is not None:
         d["rotation"] = el.rotation
+    if el.fit is not None:
+        d["fit"] = el.fit
     return d
 
 

@@ -170,9 +170,9 @@ def assign_to_slide(self, _chord_results, canonical_name: str, batch_job_ids: li
         slide.gsm               = str(gsm) if gsm is not None else None
         slide.date              = str(date) if date else None
         slide.afs               = str(afs) if afs else None
-        slide.front_image_path  = front_job.processed_path  if front_job  else None
-        slide.back_image_path   = back_job.processed_path   if back_job   else None
-        slide.detail_image_path = detail_job.processed_path if detail_job else None
+        slide.front_image_path  = (front_job.processed_path  or front_job.original_path)  if front_job  else None
+        slide.back_image_path   = (back_job.processed_path   or back_job.original_path)   if back_job   else None
+        slide.detail_image_path = (detail_job.processed_path or detail_job.original_path) if detail_job else None
 
         # ------------------------------------------------------------------
         # 7. Advance all eligible jobs to ASSIGNED

@@ -11,7 +11,7 @@ Each slide dict may include a "layout" key with per-element position overrides
 import io
 import os
 import logging
-from PIL import Image as PILImage
+from PIL import Image as PILImage, ImageOps
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
@@ -43,34 +43,47 @@ def _build_specs_text(ref_number, afs, fabric, gsm) -> str:
     return "\n".join(lines)
 
 
-def _add_picture(slide, path, box_left_in, box_top_in, box_w_in, box_h_in, rotation=0):
-    """Place image using object-fit:contain — same as the browser preview.
-
-    Reads the image's natural dimensions, scales it to fit within the given box
-    while preserving aspect ratio, then centers it in the box.
-    This ensures the PPTX output matches the browser canvas exactly.
-    """
+def _add_picture(slide, path, box_left_in, box_top_in, box_w_in, box_h_in, rotation=0, fit='contain'):
     if not path or not os.path.exists(path):
         return
     try:
         with PILImage.open(path) as img:
+            img = ImageOps.exif_transpose(img)
             img_w, img_h = img.size
 
-        img_aspect = img_w / img_h
-        box_aspect = box_w_in / box_h_in
+            img_aspect = img_w / img_h
+            box_aspect = box_w_in / box_h_in
 
-        if img_aspect > box_aspect:
-            disp_w = box_w_in
-            disp_h = box_w_in / img_aspect
-        else:
-            disp_h = box_h_in
-            disp_w = box_h_in * img_aspect
+            if fit == 'cover':
+                # Crop to box aspect ratio so the image fills the box with no letterboxing
+                if img_aspect > box_aspect:
+                    new_w = int(img_h * box_aspect)
+                    left_crop = (img_w - new_w) // 2
+                    img = img.crop((left_crop, 0, left_crop + new_w, img_h))
+                else:
+                    new_h = int(img_w / box_aspect)
+                    top_crop = (img_h - new_h) // 2
+                    img = img.crop((0, top_crop, img_w, top_crop + new_h))
+                disp_w, disp_h = box_w_in, box_h_in
+                offset_x, offset_y = 0, 0
+            else:
+                # contain: letterbox inside box
+                if img_aspect > box_aspect:
+                    disp_w = box_w_in
+                    disp_h = box_w_in / img_aspect
+                else:
+                    disp_h = box_h_in
+                    disp_w = box_h_in * img_aspect
+                offset_x = (box_w_in - disp_w) / 2
+                offset_y = (box_h_in - disp_h) / 2
 
-        offset_x = (box_w_in - disp_w) / 2
-        offset_y = (box_h_in - disp_h) / 2
+            img.thumbnail((900, 900), PILImage.LANCZOS)
+            buf = io.BytesIO()
+            img.convert("RGB").save(buf, "JPEG", quality=85)
+            buf.seek(0)
 
         pic = slide.shapes.add_picture(
-            path,
+            buf,
             Inches(box_left_in + offset_x),
             Inches(box_top_in + offset_y),
             Inches(disp_w),
@@ -152,18 +165,18 @@ def _add_garment_slide(prs, slide_data: dict, logo_path: str | None = None, logo
         dl = _el(lo, "detail", {"left": 9.34, "top": 0.17, "width": 3.95, "height": 2.42})
         sl = _el(lo, "specs",  {"left": 9.28, "top": 5.17, "width": 4.48, "height": 1.62})
         if has_front:
-            _add_picture(slide, front,  fl["left"], fl["top"], fl["width"], fl.get("height", 6.62), fl.get("rotation", 0))
+            _add_picture(slide, front,  fl["left"], fl["top"], fl["width"], fl.get("height", 6.62), fl.get("rotation", 0), fl.get("fit", "contain"))
         if has_back:
-            _add_picture(slide, back,   bl["left"], bl["top"], bl["width"], bl.get("height", 6.62), bl.get("rotation", 0))
-        _add_picture(slide, detail, dl["left"], dl["top"], dl["width"], dl.get("height", 2.42), dl.get("rotation", 0))
+            _add_picture(slide, back,   bl["left"], bl["top"], bl["width"], bl.get("height", 6.62), bl.get("rotation", 0), bl.get("fit", "contain"))
+        _add_picture(slide, detail, dl["left"], dl["top"], dl["width"], dl.get("height", 2.42), dl.get("rotation", 0), dl.get("fit", "contain"))
         _add_specs(slide, specs, sl["left"], sl["top"], sl["width"], sl.get("height", 1.62), font_pt=font_pt)
 
     elif has_front and has_back:
         fl = _el(lo, "front", {"left": 0.05, "top": 0.17, "width": 4.62, "height": 6.62})
         bl = _el(lo, "back",  {"left": 4.71, "top": 0.17, "width": 4.60, "height": 6.62})
         sl = _el(lo, "specs", {"left": 9.28, "top": 5.17, "width": 4.48, "height": 1.62})
-        _add_picture(slide, front, fl["left"], fl["top"], fl["width"], fl.get("height", 6.62), fl.get("rotation", 0))
-        _add_picture(slide, back,  bl["left"], bl["top"], bl["width"], bl.get("height", 6.62), bl.get("rotation", 0))
+        _add_picture(slide, front, fl["left"], fl["top"], fl["width"], fl.get("height", 6.62), fl.get("rotation", 0), fl.get("fit", "contain"))
+        _add_picture(slide, back,  bl["left"], bl["top"], bl["width"], bl.get("height", 6.62), bl.get("rotation", 0), bl.get("fit", "contain"))
         _add_specs(slide, specs, sl["left"], sl["top"], sl["width"], sl.get("height", 1.62), font_pt=font_pt)
 
     else:
@@ -172,7 +185,7 @@ def _add_garment_slide(prs, slide_data: dict, logo_path: str | None = None, logo
         il = _el(lo, img_key, {"left": 2.0, "top": 0.5, "width": 9.0, "height": 6.5})
         sl = _el(lo, "specs", {"left": 9.28, "top": 5.17, "width": 4.48, "height": 1.62})
         if img:
-            _add_picture(slide, img, il["left"], il["top"], il["width"], il.get("height", 6.5), il.get("rotation", 0))
+            _add_picture(slide, img, il["left"], il["top"], il["width"], il.get("height", 6.5), il.get("rotation", 0), il.get("fit", "contain"))
         _add_specs(slide, specs, sl["left"], sl["top"], sl["width"], sl.get("height", 1.62), font_pt=font_pt)
 
     _add_logo(slide, logo_path, pos=logo_pos)

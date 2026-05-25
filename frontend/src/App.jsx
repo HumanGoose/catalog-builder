@@ -65,7 +65,6 @@ export default function App() {
       const hasMatchingJob = Object.values(jobsRef.current).some(j => j.style_group === event.group)
       if (!hasMatchingJob) {
         handleJobEvent(event)
-        handleSlideEvent(event)
         return
       }
     }
@@ -86,17 +85,22 @@ export default function App() {
   const liveSlides = useMemo(() => {
     const result = {}
     Object.entries(slides).forEach(([id, slide]) => {
+      // Include any non-duplicate job in this group, regardless of pipeline status.
+      // Requiring status === 'ASSIGNED' was too strict: a job still at PROCESSED
+      // (e.g. between PROCESSED and ASSIGNED events, or after a status-rank race)
+      // would cause its image slot to be overridden with null even though the DB
+      // slide had the correct path.
       const groupJobs = Object.values(jobs).filter(
-        j => j.style_group === slide.style_number && j.status === 'ASSIGNED'
+        j => j.style_group === slide.style_number && j.status !== 'DUPLICATE'
       )
       const front  = groupJobs.find(j => j.image_type === 'front')
       const back   = groupJobs.find(j => j.image_type === 'back')
       const detail = groupJobs.find(j => j.image_type === 'detail')
       result[id] = {
         ...slide,
-        front_image_path:  front?.processed_path  ?? front?.original_path  ?? null,
-        back_image_path:   back?.processed_path   ?? back?.original_path   ?? null,
-        detail_image_path: detail?.processed_path ?? detail?.original_path ?? null,
+        front_image_path:  front  != null ? (front.processed_path  ?? front.original_path  ?? null) : null,
+        back_image_path:   back   != null ? (back.processed_path   ?? back.original_path   ?? null)  : null,
+        detail_image_path: detail != null ? (detail.processed_path ?? detail.original_path ?? null)  : null,
       }
     })
     return result

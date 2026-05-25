@@ -2,6 +2,7 @@ import os
 import io
 import base64
 import json
+import re
 import requests
 from PIL import Image
 from celery_app import celery_app
@@ -98,13 +99,26 @@ Respond with only this JSON:
         print(f"[USAGE] extract_specs job={job_id} prompt_tokens={prompt_tokens} completion_tokens={completion_tokens} cost=${cost_usd:.6f}")
 
         content = result["choices"][0]["message"]["content"].strip()
-        if content.startswith("```"):
-            content = content.split("```")[1]
-            if content.startswith("json"):
-                content = content[4:]
+
+        # Strip markdown fences if present
+        if "```" in content:
+            parts = content.split("```")
+            if len(parts) >= 2:
+                content = parts[1]
+                if content.startswith("json"):
+                    content = content[4:]
         content = content.strip()
 
-        parsed = json.loads(content)
+        # Extract the first {...} block — handles any surrounding text the model adds
+        m = re.search(r'\{.*\}', content, re.DOTALL)
+        if m:
+            content = m.group()
+
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            print(f"[EXTRACT] JSON parse failed for job {job_id}, using empty spec_data. Raw: {content[:300]}", flush=True)
+            parsed = {}
 
         job.spec_data = parsed
         job.status = "SPEC_EXTRACTED"
@@ -113,6 +127,10 @@ Respond with only this JSON:
 
         return {"job_id": job_id, "spec_data": parsed}
 
+    except json.JSONDecodeError:
+        # Already handled above; this branch is unreachable but keeps the retry
+        # handler below from swallowing parse failures as retryable errors.
+        raise
     except Exception as e:
         job = db.query(Job).filter(Job.id == job_id).first()
         if job:
