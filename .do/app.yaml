@@ -1,0 +1,59 @@
+name: catalog-builder
+region: nyc
+
+services:
+  - name: backend
+    github:
+      repo: HumanGoose/catalog-builder
+      branch: main
+      deploy_on_push: true
+    source_dir: /backend
+    dockerfile_path: backend/Dockerfile
+    http_port: 8000
+    run_command: sh start.sh
+    instance_size_slug: professional-xs
+    instance_count: 1
+    envs:
+      - key: PORT
+        value: "8000"
+      - key: OPENROUTER_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${catalog-db.DATABASE_URL}
+      - key: REDIS_URL
+        scope: RUN_TIME
+        value: ${catalog-redis.REDIS_URL}
+      - key: CELERY_BROKER_URL
+        scope: RUN_TIME
+        value: ${catalog-redis.REDIS_URL}
+      - key: CELERY_RESULT_BACKEND
+        scope: RUN_TIME
+        value: ${catalog-redis.REDIS_URL}
+
+  - name: frontend
+    github:
+      repo: HumanGoose/catalog-builder
+      branch: main
+      deploy_on_push: true
+    source_dir: /frontend
+    dockerfile_path: frontend/Dockerfile
+    http_port: 80
+    instance_size_slug: basic-xxs
+    instance_count: 1
+    envs:
+      - key: BACKEND_URL
+        scope: RUN_TIME
+        value: ${backend.PRIVATE_URL}
+
+databases:
+  - name: catalog-db
+    engine: PG
+    version: "16"
+    size: db-s-dev-database
+
+  - name: catalog-redis
+    engine: REDIS
+    version: "7"
+    size: db-s-dev-database

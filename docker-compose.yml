@@ -91,6 +91,8 @@ services:
       - "3000:80"
     depends_on:
       - api
+    environment:
+      - BACKEND_URL=http://api:8000
 
 volumes:
   postgres_data:

@@ -9,5 +9,7 @@ RUN npm run build
 # Stage 2: serve the built files with nginx
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY nginx.conf.template /nginx.conf.template
 EXPOSE 80
+# envsubst replaces only ${BACKEND_URL}, leaving nginx variables ($uri, $host etc) untouched
+CMD ["/bin/sh", "-c", "envsubst '${BACKEND_URL}' < /nginx.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
