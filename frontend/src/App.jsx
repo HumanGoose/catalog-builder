@@ -15,7 +15,7 @@ import { useJobs } from './hooks/useJobs.js'
 import { useGroups } from './hooks/useGroups.js'
 import { useSlides } from './hooks/useSlides.js'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API = '/api'
 
 export default function App() {
   const [filter, setFilter] = useState('ALL')

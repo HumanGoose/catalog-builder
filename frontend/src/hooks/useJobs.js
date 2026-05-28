@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API = '/api'
 
 const TERMINAL = new Set(['ASSIGNED', 'DUPLICATE', 'NEEDS_REVIEW', 'FAILED'])
 

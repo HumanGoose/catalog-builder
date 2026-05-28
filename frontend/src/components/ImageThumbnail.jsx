@@ -12,7 +12,7 @@ const STATUS_BORDER = {
 
 const ROLE_LABEL = { front: 'F', back: 'B', detail: 'D', spec: 'S' }
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API = '/api'
 
 function imgUrl(path) {
   if (!path) return null

@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API = '/api'
 
 export function useGroups() {
   // { [groupId]: { id, style_name, style_number, jobs: [...] } }

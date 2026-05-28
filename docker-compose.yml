@@ -83,21 +83,14 @@ services:
       - .env
 
   # ── React frontend ────────────────────────────────────────────────────────────
-  # Upload zone, live canvas, pipeline status sidebar, slide editor.
-  # The anonymous volume on /app/node_modules prevents the host mount
-  # from wiping the packages that were installed during image build.
+  # Built at image build time (npm run build), served by nginx.
+  # nginx proxies /api/* → backend and /ws → backend WebSocket.
   frontend:
     build: ./frontend
     ports:
-      - "3000:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - "3000:80"
     depends_on:
       - api
-    environment:
-      - VITE_API_URL=http://localhost:8000
-      - VITE_WS_URL=ws://localhost:8000/ws
 
 volumes:
   postgres_data:

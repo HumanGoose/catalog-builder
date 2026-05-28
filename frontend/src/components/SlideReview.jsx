@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { StatusBadge } from './StatusBadge.jsx'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API = '/api'
 
 function imgUrl(path) {
   if (!path) return null

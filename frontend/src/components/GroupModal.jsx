@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API = '/api'
 
 const STATUS_COLOR = {
   ASSIGNED: '#16a34a', PROCESSED: '#15803d', SPEC_EXTRACTED: '#15803d',

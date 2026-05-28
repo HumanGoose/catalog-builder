@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API = '/api'
 
 const ROLES = ['front', 'back', 'detail', 'spec', 'garment']
 const ROLE_LABELS = { front: 'Front', back: 'Back', detail: 'Detail', spec: 'Spec', garment: 'Garment' }

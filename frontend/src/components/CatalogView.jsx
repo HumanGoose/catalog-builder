@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API = '/api'
 
 // Internal canvas size — maps exactly to 13.33" × 7.50" at 100px/inch
 const CW = 1333
