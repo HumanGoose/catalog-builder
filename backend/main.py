@@ -33,6 +33,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+os.makedirs("storage/uploads", exist_ok=True)
+os.makedirs("storage/processed", exist_ok=True)
 os.makedirs("storage/logo", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="storage/uploads"), name="uploads")
 app.mount("/processed", StaticFiles(directory="storage/processed"), name="processed")
